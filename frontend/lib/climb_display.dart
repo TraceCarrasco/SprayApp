@@ -212,16 +212,13 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
 
       final creatorResponse = await Supabase.instance.client
           .from('climbs')
-          .select('id, grade')
+          .select('id, grade, displayname')
           .eq('climbid', widget.climbId)
           .maybeSingle();
+
       if (!mounted) return;
 
-      final userResponse = await Supabase.instance.client.auth.getUser();
-      if (!mounted) return;
-
-      final displayName =
-          userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
+      final displayName = creatorResponse?['displayname'] ?? 'N/A';
       final climbGrade = creatorResponse?['grade'] ?? 'N/A';
       final creatorId = creatorResponse?['id'];
 

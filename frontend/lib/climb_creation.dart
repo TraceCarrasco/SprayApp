@@ -65,15 +65,21 @@ class _ClimbsPageState extends State<ClimbsPage> {
     String climbDescription,
   ) async {
     String climbId = generateUuid();
-    final user = Supabase.instance.client.auth.currentUser;
+    final userI = Supabase.instance.client.auth.currentUser;
+    final userResponse = await Supabase.instance.client.auth.getUser();
+    if (!mounted) return;
+
+    final displayName =
+        userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
 
     try {
       await Supabase.instance.client.from('climbs').insert({
         'climbid': climbId,
-        'id': user?.id, // make sure to get the user's id string
+        'id': userI?.id, // make sure to get the user's id string
         'name': name,
         'grade': grade,
         'notes': climbDescription.isEmpty ? null : climbDescription,
+        'displayname': displayName,
       });
     } catch (e) {
       print("Error inserting climbs {$e}");
@@ -293,14 +299,13 @@ class _ClimbsPageState extends State<ClimbsPage> {
                             );
                             return; // Don’t insert
                           }
-
-                          Navigator.pop(context);
                           _insertClimbs(
                             climbName,
                             climbGrade,
                             holdData,
                             climbDescription,
                           );
+                          Navigator.pop(context);
                         }
                       },
                     ),
