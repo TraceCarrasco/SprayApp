@@ -1,6 +1,7 @@
 import 'holds.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'climb_update.dart';
 
 // Original image width x height in pixels
 const double originalImageWidth = 5712;
@@ -16,14 +17,18 @@ class ClimbDisplay extends StatefulWidget {
 }
 
 class _ClimbDisplayState extends State<ClimbDisplay> {
-  int _sliderValue = 0;
   late List<HtmlMapHold> holdsList;
-  List<Map<String, dynamic>> holdsArray = [];
+  List<Map<String, dynamic>> ascents = [];
   bool loading = true;
   String? error;
 
   String climbName = '';
+  String displayName = '';
   String climbGrade = '';
+  String notes = '';
+  String? createdByDisplayName;
+  bool isCurrentUserCreator = false;
+  bool isPrivate = false; // Added for private status
 
   @override
   void initState() {
@@ -40,64 +45,143 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
     super.dispose();
   }
 
-  Future<void> _insertSend(int grade, String comment, bool flash) async {
+  Future<void> _insertSend(int? attempts, int? gradeFeel) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
-    try {
-      await Supabase.instance.client.from('climbssent').insert({
-        'climbid': widget.climbId,
-        'id': user.id,
-        'grade': grade,
-        'comment': comment.isEmpty ? null : comment,
-        'is_flash': flash,
-      });
+    final displayName = user.userMetadata?['display_name'] ?? 'Unknown';
 
-      if (!mounted) return;
-      setState(() {}); // optional UI refresh
+    try {
+      // Create the new ascent object
+      final newAscent = {
+        'user_id': user.id,
+        'username': displayName,
+        'attempts': attempts,
+        'grade_feel': gradeFeel,
+        'is_flash': attempts == 0,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      // Fetch current ascents from the climb
+      final climbResponse = await Supabase.instance.client
+          .from('climbs')
+          .select('ascents')
+          .eq('climbid', widget.climbId)
+          .maybeSingle();
+
+      // Get existing ascents or create empty list
+      List<dynamic> currentAscents = [];
+      if (climbResponse != null && climbResponse['ascents'] != null) {
+        currentAscents = List<dynamic>.from(climbResponse['ascents']);
+      }
+
+      // Add the new ascent
+      currentAscents.add(newAscent);
+
+      // Update the climbs table with the new ascents array
+      await Supabase.instance.client
+          .from('climbs')
+          .update({'ascents': currentAscents}).eq('climbid', widget.climbId);
+
+      await _fetchAscents();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ascent logged!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
-      print("Error inserting send {$e}");
+      debugPrint("Error inserting send: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchAscents() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('climbs')
+          .select('ascents')
+          .eq('climbid', widget.climbId)
+          .maybeSingle();
+
+      if (response != null && response['ascents'] != null) {
+        final List<dynamic> ascentsJson = response['ascents'];
+
+        // Sort by timestamp descending (newest first)
+        ascentsJson.sort((a, b) {
+          final timestampA = a['timestamp'] ?? '';
+          final timestampB = b['timestamp'] ?? '';
+          return timestampB.compareTo(timestampA);
+        });
+
+        setState(() {
+          ascents = List<Map<String, dynamic>>.from(ascentsJson);
+        });
+      } else {
+        setState(() {
+          ascents = [];
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching ascents: $e");
     }
   }
 
   Future<void> _fetchClimbData() async {
     try {
-      final holdsResponse = await Supabase.instance.client
-          .from('climbholds')
-          .select()
-          .eq('climbid', widget.climbId);
-      if (!mounted) return;
-
-      final fetchedHolds = List<Map<String, dynamic>>.from(holdsResponse);
-
+      // Fetch climb data including holds JSONB column and private field
       final climbResponse = await Supabase.instance.client
           .from('climbs')
-          .select('name, grade')
+          .select('name, grade, holds, displayname, notes, private') // Added 'private'
           .eq('climbid', widget.climbId)
           .maybeSingle();
-      if (!mounted) return;
 
       if (climbResponse != null) {
         climbName = climbResponse['name'] ?? 'Unnamed Climb';
         climbGrade = climbResponse['grade'] ?? '';
-      }
+        displayName = climbResponse['displayname'] ?? '';
+        notes = climbResponse['notes'] ?? '';
+        createdByDisplayName = climbResponse['displayname'] ?? '';
+        isPrivate = climbResponse['private'] == true; // Get private status
 
-      for (final holdData in fetchedHolds) {
-        final int arrayIndex = holdData['array_index'];
-        final int holdState = holdData['holdstate'];
+        // Check if current user is the creator
+        final user = Supabase.instance.client.auth.currentUser;
+        final currentDisplayName = user?.userMetadata?['display_name'] ?? 'Unknown';
+        isCurrentUserCreator = currentDisplayName == createdByDisplayName;
 
-        if (arrayIndex >= 0 && arrayIndex < holdsList.length) {
-          holdsList[arrayIndex].selected = holdState;
+        // Parse holds from JSONB
+        final holdsJson = climbResponse['holds'];
+        if (holdsJson != null) {
+          final List<dynamic> holdsList = holdsJson is List ? holdsJson : [];
+
+          for (final holdData in holdsList) {
+            final int arrayIndex = holdData['array_index'] ?? -1;
+            final int holdState = holdData['holdstate'] ?? 0;
+
+            if (arrayIndex >= 0 && arrayIndex < this.holdsList.length) {
+              this.holdsList[arrayIndex].selected = holdState;
+            }
+          }
         }
       }
 
-      if (!mounted) return;
+      await _fetchAscents();
+
       setState(() {
-        holdsArray = fetchedHolds;
         loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
       setState(() {
         error = 'Error fetching climb: $e';
         loading = false;
@@ -105,11 +189,551 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
     }
   }
 
+  Future<void> _togglePrivacy() async {
+    try {
+      final newPrivateStatus = !isPrivate;
+
+      await Supabase.instance.client
+          .from('climbs')
+          .update({'private': newPrivateStatus})
+          .eq('climbid', widget.climbId);
+
+      setState(() {
+        isPrivate = newPrivateStatus;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              newPrivateStatus
+                  ? '🔒 Climb is now private'
+                  : '🌐 Climb is now public',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error toggling privacy: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating privacy: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  String _getAttemptsDisplayText(int? attempts) {
+    if (attempts == null) return '';
+    if (attempts == 0) return 'Flash';
+    if (attempts == 31) return '30+ attempts';
+    return '$attempts attempt${attempts == 1 ? '' : 's'}';
+  }
+
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null) return '';
+    try {
+      final dateTime = DateTime.parse(timestamp);
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      if (difference.inDays == 0) {
+        if (difference.inHours == 0) {
+          if (difference.inMinutes == 0) {
+            return 'Just now';
+          }
+          return '${difference.inMinutes}m ago';
+        }
+        return '${difference.inHours}h ago';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays}d ago';
+      } else {
+        return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+      }
+    } catch (e) {
+      return '';
+    }
+  }
+
+  void _showClimbSettings() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Climb Settings',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.edit),
+                    title: const Text('Update Climb'),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ClimbUpdatePage(climbId: widget.climbId),
+                        ),
+                      );
+                      // If update was successful, refresh the climb data
+                      if (result == true) {
+                        _fetchClimbData();
+                      }
+                    },
+                  ),
+                  // Privacy toggle option
+                  ListTile(
+                    leading: Icon(
+                      isPrivate ? Icons.lock_open : Icons.lock,
+                      color: isPrivate ? Colors.green : Colors.orange,
+                    ),
+                    title: Text(
+                      isPrivate ? 'Make Public' : 'Make Private',
+                      style: TextStyle(
+                        color: isPrivate ? Colors.green : Colors.orange,
+                      ),
+                    ),
+                    subtitle: Text(
+                      isPrivate
+                          ? 'Currently only visible to you'
+                          : 'Currently visible to everyone',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    trailing: Switch(
+                      value: isPrivate,
+                      onChanged: (value) async {
+                        await _togglePrivacy();
+                        setModalState(() {}); // Update modal UI
+                      },
+                      activeColor: Colors.orange,
+                    ),
+                    onTap: () async {
+                      await _togglePrivacy();
+                      setModalState(() {}); // Update modal UI
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.delete, color: Colors.red),
+                    title: const Text('Delete Climb', style: TextStyle(color: Colors.red)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showDeleteConfirmation();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDeleteConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Climb'),
+        content: Text(
+          'Are you sure you want to delete "$climbName"? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteClimb();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteClimb() async {
+    try {
+      await Supabase.instance.client
+          .from('climbs')
+          .delete()
+          .eq('climbid', widget.climbId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Climb deleted successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.pop(context); // Go back to previous screen
+      }
+    } catch (e) {
+      debugPrint("Error deleting climb: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting climb: $e'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageAspectRatio = originalImageWidth / originalImageHeight;
+
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                climbName.isEmpty
+                    ? 'Loading...'
+                    : climbGrade.isEmpty
+                        ? climbName
+                        : '$climbName | $climbGrade',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Show lock icon if private
+            if (isPrivate && !loading) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.lock, size: 18),
+            ],
+          ],
+        ),
+        actions: [
+          if (isCurrentUserCreator)
+            IconButton(
+              icon: const Icon(Icons.settings),
+              tooltip: "Climb Settings",
+              onPressed: _showClimbSettings,
+            ),
+        ],
+      ),
+      body: SafeArea(
+        child: loading
+            ? const Center(child: CircularProgressIndicator())
+            : error != null
+                ? Center(child: Text(error!))
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final maxWidth = constraints.maxWidth;
+                      final maxHeight = constraints.maxHeight;
+
+                      // Image section: 2/3, Ascents section: 1/3
+                      final imageAreaHeight = maxHeight * 2 / 3;
+                      final ascentsAreaHeight = maxHeight / 3;
+
+                      final maxDisplayWidth =
+                          maxWidth > 800 ? 800.0 : maxWidth;
+
+                      double displayedWidth;
+                      double displayedHeight;
+
+                      final widthBasedHeight =
+                          maxDisplayWidth / imageAspectRatio;
+
+                      if (widthBasedHeight <= imageAreaHeight - 70) {
+                        displayedWidth = maxDisplayWidth;
+                        displayedHeight = widthBasedHeight;
+                      } else {
+                        displayedHeight = imageAreaHeight - 70;
+                        displayedWidth = displayedHeight * imageAspectRatio;
+                      }
+
+                      final scaleX = displayedWidth / originalImageWidth;
+                      final scaleY = displayedHeight / originalImageHeight;
+                      final fontScale = displayedWidth / 1500;
+
+                      return Column(
+                        children: [
+                          // TOP 2/3: Image + Log Button
+                          SizedBox(
+                            height: imageAreaHeight,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 8),
+                                Center(
+                                  child: InteractiveViewer(
+                                    panEnabled: true,
+                                    scaleEnabled: true,
+                                    minScale: 1.0,
+                                    maxScale: 5.0,
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        Image.asset(
+                                          'assets/spray_wall.jpeg',
+                                          width: displayedWidth,
+                                          height: displayedHeight,
+                                          fit: BoxFit.contain,
+                                        ),
+                                        CustomPaint(
+                                          size: Size(
+                                              displayedWidth, displayedHeight),
+                                          painter: _HtmlMapPainter(
+                                            holdsList,
+                                            scaleX,
+                                            scaleY,
+                                            fontScale,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    final initialGrade = int.tryParse(
+                                          climbGrade.replaceAll(
+                                              RegExp(r'[vV]'), ''),
+                                        ) ??
+                                        0;
+                                    _sendForm(context, initialGrade);
+                                  },
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Log Ascent'),
+                                ),
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      if (displayName.isNotEmpty)
+                                        Text(
+                                          'Set by: $displayName',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade700,
+                                            fontSize: 15,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      if (notes.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          notes,
+                                          style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 12,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const Divider(height: 1, thickness: 1),
+
+                          // BOTTOM 1/3: Ascents List
+                          SizedBox(
+                            height: ascentsAreaHeight - 1,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.people_outline,
+                                          size: 20),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Ascents (${ascents.length})',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ascents.isEmpty
+                                      ? const Center(
+                                          child: Text(
+                                            'No ascents yet. Be the first!',
+                                            style:
+                                                TextStyle(color: Colors.grey),
+                                          ),
+                                        )
+                                      : ListView.separated(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12),
+                                          itemCount: ascents.length,
+                                          separatorBuilder: (_, __) =>
+                                              const SizedBox(height: 8),
+                                          itemBuilder: (context, index) {
+                                            final ascent = ascents[index];
+                                            final username =
+                                                ascent['username'] ?? 'Unknown';
+                                            final gradeFeel =
+                                                ascent['grade_feel'];
+                                            final attempts = ascent['attempts'];
+                                            final isFlash =
+                                                ascent['is_flash'] ?? false;
+                                            final timestamp =
+                                                ascent['timestamp'];
+
+                                            return Card(
+                                              margin: EdgeInsets.zero,
+                                              child: ListTile(
+                                                leading: CircleAvatar(
+                                                  child: Text(
+                                                    username.toString().isNotEmpty
+                                                        ? username
+                                                            .toString()[0]
+                                                            .toUpperCase()
+                                                        : '?',
+                                                  ),
+                                                ),
+                                                title: Row(
+                                                  children: [
+                                                    Flexible(
+                                                      child: Text(
+                                                        username.toString(),
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ),
+                                                    if (isFlash) ...[
+                                                      const SizedBox(width: 6),
+                                                      const Icon(
+                                                        Icons.flash_on,
+                                                        color: Colors.amber,
+                                                        size: 18,
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                                subtitle: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    if (attempts != null)
+                                                      Text(
+                                                        _getAttemptsDisplayText(
+                                                            attempts),
+                                                        style: TextStyle(
+                                                          color: Colors
+                                                              .grey.shade600,
+                                                        ),
+                                                      ),
+                                                    if (timestamp != null)
+                                                      Text(
+                                                        _formatTimestamp(
+                                                            timestamp),
+                                                        style: TextStyle(
+                                                          color: Colors
+                                                              .grey.shade500,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                                trailing: gradeFeel != null
+                                                    ? Container(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                          horizontal: 8,
+                                                          vertical: 4,
+                                                        ),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: Colors.blue
+                                                              .withOpacity(0.1),
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(8),
+                                                        ),
+                                                        child: Text(
+                                                          'V$gradeFeel',
+                                                          style:
+                                                              const TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Colors.blue,
+                                                          ),
+                                                        ),
+                                                      )
+                                                    : null,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+      ),
+    );
+  }
+
   void _sendForm(BuildContext context, int initialGrade) {
-    _sliderValue = initialGrade;
-    final formKey = GlobalKey<FormState>();
-    final commentController = TextEditingController();
-    bool isFlash = false;
+    int attemptsSliderValue = 1;
+    int gradeSliderValue = initialGrade;
+
+    final List<String> attemptLabels = [
+      'Flash',
+      ...List.generate(30, (i) => '${i + 1}'),
+      '30+',
+    ];
 
     showModalBottomSheet(
       context: context,
@@ -122,317 +746,99 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
             right: 16,
             top: 16,
           ),
-          child: Form(
-            key: formKey,
-            child: Wrap(
-              children: [
-                Text('Log send', style: Theme.of(context).textTheme.titleLarge),
-                StatefulBuilder(
-                  builder: (context, setModalState) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Grade',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+          child: Wrap(
+            children: [
+              Text(
+                'Log Ascent',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16, width: double.infinity),
+              StatefulBuilder(
+                builder: (context, setModalState) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Number of Attempts
+                      const Text(
+                        'Number of Attempts',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Slider(
+                        value: attemptsSliderValue.toDouble(),
+                        min: 0,
+                        max: 31,
+                        divisions: 31,
+                        label: attemptLabels[attemptsSliderValue],
+                        onChanged: (newValue) {
+                          setModalState(() {
+                            attemptsSliderValue = newValue.round();
+                          });
+                        },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Text(
+                          'Attempts: ${attemptLabels[attemptsSliderValue]}',
                         ),
-                        Slider(
-                          value: _sliderValue.toDouble(),
-                          min: 0,
-                          max: 17,
-                          divisions: 17,
-                          label: 'V$_sliderValue',
-                          onChanged: (newValue) {
-                            setModalState(
-                              () => _sliderValue = newValue.round(),
-                            );
-                          },
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Selected Grade: V$_sliderValue'),
-                        ),
-                        CheckboxListTile(
-                          title: const Text("Flash"),
-                          value: isFlash,
-                          onChanged: (val) =>
-                              setModalState(() => isFlash = val ?? false),
-                          controlAffinity: ListTileControlAffinity.leading,
-                        ),
-                        const SizedBox(height: 8),
-                        TextFormField(
-                          controller: commentController,
-                          maxLines: 3,
-                          decoration: const InputDecoration(
-                            labelText: 'Comments (optional)',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      child: const Text('Cancel'),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    ElevatedButton(
-                      child: const Text('Save'),
-                      onPressed: () async {
-                        if (formKey.currentState!.validate()) {
-                          formKey.currentState!.save();
-                          Navigator.pop(context);
+                      ),
 
-                          await _insertSend(
-                            _sliderValue,
-                            commentController.text,
-                            isFlash,
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                      // Grade Feel
+                      const Text(
+                        'Grade Feel',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Slider(
+                        value: gradeSliderValue.toDouble(),
+                        min: 0,
+                        max: 17,
+                        divisions: 17,
+                        label: 'V$gradeSliderValue',
+                        onChanged: (newValue) {
+                          setModalState(() {
+                            gradeSliderValue = newValue.round();
+                          });
+                        },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text('Grade: V$gradeSliderValue'),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    child: const Text('Cancel'),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  ElevatedButton(
+                    child: const Text('Log Send'),
+                    onPressed: () {
+                      // Convert slider value to database value
+                      int? attemptsValue;
+                      if (attemptsSliderValue == 0) {
+                        attemptsValue = 0; // Flash
+                      } else if (attemptsSliderValue == 31) {
+                        attemptsValue = 31; // 30+
+                      } else {
+                        attemptsValue = attemptsSliderValue;
+                      }
+
+                      _insertSend(attemptsValue, gradeSliderValue);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16, width: double.infinity),
+            ],
           ),
         );
       },
-    );
-  }
-
-  void _infoForm(BuildContext context) async {
-    try {
-      final userId = Supabase.instance.client.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final creatorResponse = await Supabase.instance.client
-          .from('climbs')
-          .select('id, grade, displayname')
-          .eq('climbid', widget.climbId)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      final displayName = creatorResponse?['displayname'] ?? 'N/A';
-      final climbGrade = creatorResponse?['grade'] ?? 'N/A';
-      final creatorId = creatorResponse?['id'];
-
-      final sendsResponse = await Supabase.instance.client
-          .from('climbssent')
-          .select()
-          .eq('climbid', widget.climbId);
-      if (!mounted) return;
-
-      final sendsCount = sendsResponse.length;
-
-      if (!mounted) return;
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        builder: (context) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              children: [
-                Text(
-                  'Climb Info',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Created By:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(displayName),
-                  ],
-                ),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Grade:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(climbGrade),
-                  ],
-                ),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'User Sends:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(sendsCount.toString()),
-                  ],
-                ),
-                const Divider(),
-                if (creatorId == userId) ...[
-                  const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.delete),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                    ),
-                    label: const Text('Delete Climb'),
-                    onPressed: () async {
-                      final confirm = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Delete Climb'),
-                          content: const Text(
-                            'Are you sure you want to delete this climb? This cannot be undone.',
-                          ),
-                          actions: [
-                            TextButton(
-                              child: const Text('Cancel'),
-                              onPressed: () => Navigator.pop(context, false),
-                            ),
-                            ElevatedButton(
-                              child: const Text('Delete'),
-                              onPressed: () => Navigator.pop(context, true),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (!mounted) return;
-                      if (confirm == true) {
-                        await Supabase.instance.client
-                            .from('climbs')
-                            .delete()
-                            .eq('climbid', widget.climbId);
-                        if (!mounted) return;
-                        Navigator.pop(context);
-                        Navigator.pop(context);
-                      }
-                    },
-                  ),
-                  const Divider(),
-                ],
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton(
-                    child: const Text('Close'),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Error loading climb info')));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final imageAspectRatio = originalImageWidth / originalImageHeight;
-
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: true,
-        title: Text(
-          climbName.isEmpty
-              ? 'Loading...'
-              : climbGrade.isEmpty
-              ? climbName
-              : '$climbName | $climbGrade',
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info),
-            onPressed: () => _infoForm(context),
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final maxWidth = constraints.maxWidth;
-          final maxHeight = constraints.maxHeight;
-          final fontScale = maxWidth / 1500;
-
-          double displayedWidth;
-          double displayedHeight;
-
-          if (maxWidth / maxHeight > imageAspectRatio) {
-            displayedHeight = maxHeight * 0.9;
-            displayedWidth = displayedHeight * imageAspectRatio;
-          } else {
-            displayedWidth = maxWidth * 0.9;
-            displayedHeight = displayedWidth / imageAspectRatio;
-          }
-
-          final displayedSize = Size(displayedWidth, displayedHeight);
-
-          return SingleChildScrollView(
-            child: Center(
-              child: Column(
-                children: [
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: InteractiveViewer(
-                      panEnabled: true,
-                      scaleEnabled: true,
-                      minScale: 1.0,
-                      maxScale: 5.0,
-                      child: Stack(
-                        children: [
-                          Image.asset(
-                            'assets/spray_wall.jpeg',
-                            width: displayedWidth,
-                            height: displayedHeight,
-                            fit: BoxFit.fill,
-                          ),
-                          CustomPaint(
-                            size: displayedSize,
-                            painter: _HtmlMapPainter(
-                              holdsList,
-                              displayedWidth / originalImageWidth,
-                              displayedHeight / originalImageHeight,
-                              fontScale,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      final initialGrade =
-                          int.tryParse(
-                            climbGrade.replaceAll(RegExp(r'[vV]'), ''),
-                          ) ??
-                          0;
-                      _sendForm(context, initialGrade);
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Log'),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 }
@@ -450,17 +856,17 @@ class _HtmlMapPainter extends CustomPainter {
     for (final hold in holds) {
       if (hold.selected == 0) continue;
 
-      final scaledPoints = hold.points
-          .map((p) => Offset(p.dx * scaleX, p.dy * scaleY))
-          .toList();
+      final scaledPoints =
+          hold.points.map((p) => Offset(p.dx * scaleX, p.dy * scaleY)).toList();
+
       final path = Path()..addPolygon(scaledPoints, true);
 
       final fillPaint = Paint()
         ..color = switch (hold.selected) {
-          1 => Colors.blue.withValues(alpha: 0.5),
-          2 => Colors.orange.withValues(alpha: 0.5),
-          3 => Colors.green.withValues(alpha: 0.5),
-          4 => Colors.purple.withValues(alpha: 0.5),
+          1 => Colors.blue.withOpacity(0.5),
+          2 => Colors.orange.withOpacity(0.5),
+          3 => Colors.green.withOpacity(0.5),
+          4 => Colors.purple.withOpacity(0.5),
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;
@@ -472,49 +878,6 @@ class _HtmlMapPainter extends CustomPainter {
 
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
-
-      final holdLabel = switch (hold.selected) {
-        1 => 'Hand',
-        2 => 'Foot',
-        3 => 'Start',
-        4 => 'Finish',
-        _ => '',
-      };
-
-      if (holdLabel.isNotEmpty) {
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: holdLabel,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15 * fontScale,
-              fontWeight: FontWeight.bold,
-              shadows: [
-                const Shadow(
-                  blurRadius: 3,
-                  color: Colors.black,
-                  offset: Offset(1, 1),
-                ),
-              ],
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        textPainter.layout();
-
-        final centerX =
-            scaledPoints.map((p) => p.dx).reduce((a, b) => a + b) /
-            scaledPoints.length;
-        final centerY =
-            scaledPoints.map((p) => p.dy).reduce((a, b) => a + b) /
-            scaledPoints.length;
-        final center = Offset(centerX, centerY);
-
-        textPainter.paint(
-          canvas,
-          center - Offset(textPainter.width / 2, textPainter.height / 2),
-        );
-      }
     }
   }
 

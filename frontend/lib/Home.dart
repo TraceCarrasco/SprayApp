@@ -36,7 +36,6 @@ class _HomeWithNavState extends State<HomeWithNav> {
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
           BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Climbs'),
 
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Create'),
         ],
       ),
     );

@@ -24,13 +24,31 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'SprayWall',
       home: const AuthGate(),
+
+      // Light theme
       theme: ThemeData(
+        brightness: Brightness.light,
         bottomNavigationBarTheme: const BottomNavigationBarThemeData(
           selectedItemColor: Colors.deepOrange,
           unselectedItemColor: Colors.grey,
         ),
-        textTheme: GoogleFonts.playTextTheme(), // cool modern font
+        textTheme: GoogleFonts.playTextTheme(),
       ),
+
+      // Dark theme
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          selectedItemColor: Colors.deepOrange,
+          unselectedItemColor: Colors.grey,
+        ),
+        textTheme: GoogleFonts.playTextTheme(
+          ThemeData.dark().textTheme,
+        ),
+      ),
+
+      // 👇 this is the magic line
+      themeMode: ThemeMode.dark,
     );
   }
 }

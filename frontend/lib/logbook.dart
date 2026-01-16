@@ -19,74 +19,108 @@ class _LogbookPageState extends State<LogbookPage> {
   @override
   void initState() {
     super.initState();
-    _fetchUserSends();
+    _fetchUserLogbook();
   }
 
-  Future<void> _fetchUserSends() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return;
+  /// Converts "V8" -> 8 safely
+  int _parseGrade(String? grade) {
+    if (grade == null) return 0;
+    return int.tryParse(
+          grade.toUpperCase().replaceAll('V', ''),
+        ) ??
+        0;
+  }
+
+  Future<void> _fetchUserLogbook() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
 
     try {
       final response = await Supabase.instance.client
-          .from('climbssent')
-          .select('grade, is_flash, comment, climbs(name)')
-          .eq('id', userId)
-          .order('created_at', ascending: false); // latest first
+          .from('climbs')
+          .select('name, grade, ascents')
+          .not('ascents', 'is', null);
 
-      if (!mounted) return;
-
-      final List<Map<String, dynamic>> fetchedSends =
-          List<Map<String, dynamic>>.from(response);
+      final List<Map<String, dynamic>> logs = [];
 
       int maxSend = 0;
       int maxFlash = 0;
 
-      for (final send in fetchedSends) {
-        final gradeNum = send['grade'] ?? 0;
-        if (gradeNum > maxSend) maxSend = gradeNum;
-        if ((send['is_flash'] ?? false) && gradeNum > maxFlash) {
-          maxFlash = gradeNum;
+      for (final climb in response) {
+        final ascents = climb['ascents'] as List<dynamic>? ?? [];
+        final gradeStr = climb['grade'] as String?;
+        final gradeNum = _parseGrade(gradeStr);
+
+        for (final ascent in ascents) {
+          if (ascent['user_id'] != user.id) continue;
+
+          final isFlash = ascent['is_flash'] ?? false;
+
+          logs.add({
+            'climb_name': climb['name'] ?? 'Unnamed',
+            'grade': gradeStr ?? '',
+            'grade_num': gradeNum,
+            'is_flash': isFlash,
+            'timestamp': ascent['timestamp'],
+          });
+
+          if (gradeNum > maxSend) maxSend = gradeNum;
+          if (isFlash && gradeNum > maxFlash) {
+            maxFlash = gradeNum;
+          }
         }
       }
 
+      // Newest first
+      logs.sort((a, b) {
+        final aTime = a['timestamp'] ?? '';
+        final bTime = b['timestamp'] ?? '';
+        return bTime.compareTo(aTime);
+      });
+
+      if (!mounted) return;
+
       setState(() {
-        sendLogs = fetchedSends;
-        totalSends = fetchedSends.length;
+        sendLogs = logs;
+        totalSends = logs.length;
         hardestSendGrade = maxSend;
         hardestFlashGrade = maxFlash;
         loading = false;
       });
     } catch (e) {
-      print("Error fetching sends: $e");
+      debugPrint("Error fetching logbook: $e");
       if (mounted) {
-        setState(() {
-          loading = false;
-        });
+        setState(() => loading = false);
       }
     }
   }
 
-  String _formatGrade(int grade) => 'V$grade';
+  String _formatGrade(int grade) => grade > 0 ? 'V$grade' : '-';
 
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
       appBar: AppBar(title: const Text("My Logbook")),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // STATS HEADER
+            // STATS
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _buildStatCard("Total Sends", totalSends.toString()),
-                _buildStatCard("Hardest Send", _formatGrade(hardestSendGrade)),
+                _buildStatCard(
+                  "Hardest Send",
+                  _formatGrade(hardestSendGrade),
+                ),
                 _buildStatCard(
                   "Hardest Flash",
                   _formatGrade(hardestFlashGrade),
@@ -100,6 +134,7 @@ class _LogbookPageState extends State<LogbookPage> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const Divider(),
+
             Expanded(
               child: sendLogs.isEmpty
                   ? const Center(child: Text("No sends logged yet."))
@@ -107,25 +142,23 @@ class _LogbookPageState extends State<LogbookPage> {
                       itemCount: sendLogs.length,
                       itemBuilder: (context, index) {
                         final send = sendLogs[index];
-                        final grade = send['grade'] ?? 0;
-                        final climbName = send['climbs']?['name'] ?? 'Unnamed';
+                        final gradeNum = send['grade_num'] as int;
 
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: grade <= 4
+                            backgroundColor: gradeNum <= 4
                                 ? Colors.green
-                                : grade <= 8
-                                ? Colors.blue
-                                : Colors.red,
+                                : gradeNum <= 8
+                                    ? Colors.blue
+                                    : Colors.red,
                             child: Text(
-                              _formatGrade(grade),
+                              send['grade'],
                               style: const TextStyle(color: Colors.white),
                             ),
                           ),
-
-                          title: Text(climbName),
+                          title: Text(send['climb_name']),
                           subtitle: Text(
-                            "${send['comment'] ?? ''} • ${send['is_flash'] == true ? 'Flash' : ''}",
+                            send['is_flash'] == true ? 'Flash' : 'Send',
                           ),
                         );
                       },
@@ -137,13 +170,15 @@ class _LogbookPageState extends State<LogbookPage> {
     );
   }
 
-  // Tiny helper widget for stat boxes
   Widget _buildStatCard(String title, String value) {
     return Column(
       children: [
         Text(
           value,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 4),
         Text(title, style: const TextStyle(color: Colors.grey)),

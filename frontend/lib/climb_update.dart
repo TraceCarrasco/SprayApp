@@ -1,33 +1,88 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'holds.dart';
-import 'package:uuid/uuid.dart';
 
 const double originalImageWidth = 5712;
 const double originalImageHeight = 4284;
 
-class ClimbsPage extends StatefulWidget {
-  const ClimbsPage({super.key});
+class ClimbUpdatePage extends StatefulWidget {
+  final String climbId;
+
+  const ClimbUpdatePage({super.key, required this.climbId});
 
   @override
-  State<ClimbsPage> createState() => _ClimbsPageState();
+  State<ClimbUpdatePage> createState() => _ClimbUpdatePageState();
 }
 
-class _ClimbsPageState extends State<ClimbsPage> {
+class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
   late List<HtmlMapHold> holdsList;
-  int _sliderValue = 0;
   List<HtmlMapHold> selectedHolds = [];
-  bool _isPrivate = false;
+  bool loading = true;
+  String? error;
+
+  // Climb data
+  String climbName = '';
+  String climbGrade = '';
+  String notes = '';
+  int gradeValue = 0;
 
   @override
   void initState() {
     super.initState();
     holdsList = holds;
+    _fetchClimbData();
   }
 
-  String generateUuid() {
-    final uuid = Uuid();
-    return uuid.v4();
+  @override
+  void dispose() {
+    for (final hold in holdsList) {
+      hold.selected = 0;
+    }
+    super.dispose();
+  }
+
+  Future<void> _fetchClimbData() async {
+    try {
+      final climbResponse = await Supabase.instance.client
+          .from('climbs')
+          .select('name, grade, holds, notes')
+          .eq('climbid', widget.climbId)
+          .maybeSingle();
+
+      if (climbResponse != null) {
+        climbName = climbResponse['name'] ?? '';
+        climbGrade = climbResponse['grade'] ?? '';
+        notes = climbResponse['notes'] ?? '';
+
+        // Extract grade value (remove 'V' prefix)
+        gradeValue = int.tryParse(climbGrade.replaceAll(RegExp(r'[vV]'), '')) ?? 0;
+
+        // Parse and restore holds
+        final holdsJson = climbResponse['holds'];
+        if (holdsJson != null) {
+          final List<dynamic> holdsData = holdsJson is List ? holdsJson : [];
+
+          for (final holdData in holdsData) {
+            final int arrayIndex = holdData['array_index'] ?? -1;
+            final int holdState = holdData['holdstate'] ?? 0;
+
+            if (arrayIndex >= 0 && arrayIndex < holdsList.length) {
+              holdsList[arrayIndex].selected = holdState;
+              selectedHolds.add(holdsList[arrayIndex]);
+            }
+          }
+        }
+      }
+
+      setState(() {
+        loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        error = 'Error fetching climb: $e';
+        loading = false;
+      });
+    }
   }
 
   bool _hasStartAndFinish() {
@@ -65,44 +120,41 @@ class _ClimbsPageState extends State<ClimbsPage> {
     });
   }
 
-  Future<void> _insertClimbs(
+  Future<void> _updateClimb(
     String name,
     String grade,
     List<Map<String, dynamic>> holds,
     String climbDescription,
-    bool isPrivate,
   ) async {
-    String climbId = generateUuid();
-    final user = Supabase.instance.client.auth.currentUser;
-    final userResponse = await Supabase.instance.client.auth.getUser();
-    if (!mounted) return;
-
-    final displayName =
-        userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
-
     try {
-      await Supabase.instance.client.from('climbs').insert({
-        'climbid': climbId,
-        'id': user?.id,
+      await Supabase.instance.client.from('climbs').update({
         'name': name,
         'grade': grade,
         'notes': climbDescription.isEmpty ? null : climbDescription,
-        'displayname': displayName,
         'holds': holds,
-        'private': isPrivate,
-        'createdat': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint("Error inserting climb: $e");
-    }
+      }).eq('climbid', widget.climbId);
 
-    // Reset state
-    for (final hold in holdsList) {
-      hold.selected = 0;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Climb updated successfully!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        Navigator.pop(context, true); // Return true to indicate success
+      }
+    } catch (e) {
+      debugPrint("Error updating climb: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating climb: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
-    selectedHolds.clear();
-    _isPrivate = false;
-    setState(() {});
   }
 
   @override
@@ -115,91 +167,94 @@ class _ClimbsPageState extends State<ClimbsPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Frogs'),
+        title: const Text('Update Climb'),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final displayedWidth = constraints.maxWidth;
-          final displayedHeight = displayedWidth / imageAspectRatio;
-          final displayedSize = Size(displayedWidth, displayedHeight);
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : error != null
+              ? Center(child: Text(error!))
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final displayedWidth = constraints.maxWidth;
+                    final displayedHeight = displayedWidth / imageAspectRatio;
+                    final displayedSize = Size(displayedWidth, displayedHeight);
 
-          return SingleChildScrollView(
-            child: Center(
-              child: Column(
-                children: [
-                  SizedBox(height: displayedHeight * .5),
-                  InteractiveViewer(
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    minScale: 1.0,
-                    maxScale: 5.0,
-                    child: GestureDetector(
-                      onTapUp: (details) =>
-                          _handleTap(details, displayedSize),
-                      child: Stack(
-                        children: [
-                          Image.asset(
-                            'assets/spray_wall.jpeg',
-                            width: displayedWidth,
-                            height: displayedHeight,
-                            fit: BoxFit.fill,
-                          ),
-                          CustomPaint(
-                            size: displayedSize,
-                            painter: _HtmlMapPainter(
-                              holdsList,
-                              displayedWidth / originalImageWidth,
-                              displayedHeight / originalImageHeight,
-                              constraints.maxWidth / 1500,
+                    return SingleChildScrollView(
+                      child: Center(
+                        child: Column(
+                          children: [
+                            SizedBox(height: displayedHeight * .5),
+                            InteractiveViewer(
+                              panEnabled: true,
+                              scaleEnabled: true,
+                              minScale: 1.0,
+                              maxScale: 5.0,
+                              child: GestureDetector(
+                                onTapUp: (details) =>
+                                    _handleTap(details, displayedSize),
+                                child: Stack(
+                                  children: [
+                                    Image.asset(
+                                      'assets/spray_wall.jpeg',
+                                      width: displayedWidth,
+                                      height: displayedHeight,
+                                      fit: BoxFit.fill,
+                                    ),
+                                    CustomPaint(
+                                      size: displayedSize,
+                                      painter: _HtmlMapPainter(
+                                        holdsList,
+                                        displayedWidth / originalImageWidth,
+                                        displayedHeight / originalImageHeight,
+                                        constraints.maxWidth / 1500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      if (!_hasStartAndFinish()) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Select at least one START and one FINISH hold before creating a climb.',
-                            ),
-                          ),
-                        );
-                        return;
-                      }
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                if (!_hasStartAndFinish()) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Select at least one START and one FINISH hold.',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
 
-                      _openCreateClimbForm(context);
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Climb'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
+                                _openUpdateClimbForm(context);
+                              },
+                              icon: const Icon(Icons.save),
+                              label: const Text('Save Changes'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                    );
+                  },
+                ),
     );
   }
 
-  void _openCreateClimbForm(BuildContext context) {
+  void _openUpdateClimbForm(BuildContext context) {
     final formKey = GlobalKey<FormState>();
-    String climbName = '';
-    String climbDescription = '';
-    String climbGrade = '';
-    bool isPrivate = _isPrivate;
+    String updatedName = climbName;
+    String updatedDescription = notes;
+    int updatedGradeValue = gradeValue;
 
     showModalBottomSheet(
       context: context,
@@ -217,62 +272,46 @@ class _ClimbsPageState extends State<ClimbsPage> {
             child: Wrap(
               children: [
                 Text(
-                  'Create New Climb',
+                  'Update Climb',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 16, width: double.infinity),
                 TextFormField(
+                  initialValue: climbName,
                   decoration: const InputDecoration(labelText: 'Climb Name'),
                   validator: (value) =>
                       value == null || value.isEmpty ? 'Enter a name' : null,
-                  onSaved: (value) => climbName = value ?? '',
+                  onSaved: (value) => updatedName = value ?? '',
                 ),
                 TextFormField(
+                  initialValue: notes,
                   decoration: const InputDecoration(labelText: 'Description'),
                   maxLines: 1,
-                  onSaved: (value) => climbDescription = value ?? '',
+                  onSaved: (value) => updatedDescription = value ?? '',
                 ),
                 StatefulBuilder(
                   builder: (context, setModalState) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(height: 8),
                         const Text(
                           'Grade',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Slider(
-                          value: _sliderValue.toDouble(),
+                          value: updatedGradeValue.toDouble(),
                           min: 0,
                           max: 17,
                           divisions: 17,
-                          label: 'V$_sliderValue',
+                          label: 'V$updatedGradeValue',
                           onChanged: (newValue) {
                             setModalState(() {
-                              _sliderValue = newValue.round();
+                              updatedGradeValue = newValue.round();
                             });
                           },
                         ),
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Selected Grade: V$_sliderValue'),
-                        ),
-                        const SizedBox(height: 8),
-                        CheckboxListTile(
-                          title: const Text('Private'),
-                          subtitle: const Text(
-                            'Only you can see this climb',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          value: isPrivate,
-                          onChanged: (value) {
-                            setModalState(() {
-                              isPrivate = value ?? false;
-                            });
-                          },
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.leading,
+                          child: Text('Selected Grade: V$updatedGradeValue'),
                         ),
                       ],
                     );
@@ -292,7 +331,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                         if (!formKey.currentState!.validate()) return;
 
                         formKey.currentState!.save();
-                        climbGrade = 'V$_sliderValue';
+                        final updatedGrade = 'V$updatedGradeValue';
 
                         final List<Map<String, dynamic>> holdData = [];
                         bool hasStart = false;
@@ -321,19 +360,17 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           return;
                         }
 
-                        _insertClimbs(
-                          climbName,
-                          climbGrade,
+                        _updateClimb(
+                          updatedName,
+                          updatedGrade,
                           holdData,
-                          climbDescription,
-                          isPrivate,
+                          updatedDescription,
                         );
                         Navigator.pop(context);
                       },
                     ),
                   ],
                 ),
-                const SizedBox(height: 16, width: double.infinity),
               ],
             ),
           ),

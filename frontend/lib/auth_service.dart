@@ -14,16 +14,79 @@ class AuthService {
     );
   }
 
+  // Validate username format
+  String? validateUsername(String username) {
+    if (username.isEmpty) {
+      return 'Username cannot be empty';
+    }
+    if (username.length < 3) {
+      return 'Username must be at least 3 characters';
+    }
+    if (username.length > 20) {
+      return 'Username must be 20 characters or less';
+    }
+    if (!RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(username)) {
+      return 'Username can only contain letters, numbers, _ and -';
+    }
+    return null;
+  }
+
+  // Check if username is already taken
+  Future<bool> isUsernameTaken(String username) async {
+    try {
+      final response = await _supabase
+          .from('profiles')
+          .select('id')
+          .eq('display_name', username)
+          .maybeSingle();
+
+      return response != null;
+    } catch (e) {
+      // If profiles table doesn't exist yet or other error, allow attempt
+      return false;
+    }
+  }
+
   // Sign up with email
-  Future<UserResponse> signUpWithEmailPassword(
+  Future<AuthResponse> signUpWithEmailPassword(
     String email,
     String password,
     String username,
   ) async {
-    await _supabase.auth.signUp(email: email, password: password);
-    return await _supabase.auth.updateUser(
-      UserAttributes(data: {'display_name': username}),
+    // Validate username format
+    final validationError = validateUsername(username);
+    if (validationError != null) {
+      throw AuthException(validationError);
+    }
+
+    // Check if username is taken
+    final isTaken = await isUsernameTaken(username);
+    if (isTaken) {
+      throw AuthException('Username is already taken');
+    }
+
+    // Sign up with username in metadata
+    // The database trigger will create the profile entry
+    final response = await _supabase.auth.signUp(
+      email: email,
+      password: password,
+      data: {'display_name': username},
     );
+
+    // If signup was successful but trigger didn't create profile,
+    // manually insert it (fallback)
+    if (response.user != null) {
+      try {
+        await _supabase.from('profiles').upsert({
+          'id': response.user!.id,
+          'display_name': username,
+        });
+      } catch (e) {
+        // Profile might already exist from trigger, that's ok
+      }
+    }
+
+    return response;
   }
 
   // Sign out
@@ -35,5 +98,16 @@ class AuthService {
     final session = _supabase.auth.currentSession;
     final user = session?.user;
     return user?.email;
+  }
+
+  // Get current user's display name
+  String? getCurrentDisplayName() {
+    final user = _supabase.auth.currentUser;
+    return user?.userMetadata?['display_name'];
+  }
+
+  // Get current user ID
+  String? getCurrentUserId() {
+    return _supabase.auth.currentUser?.id;
   }
 }

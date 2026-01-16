@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import "climb_display.dart";
+import 'climb_display.dart';
+import 'climb_creation.dart';
 
 class ClimbList extends StatefulWidget {
   const ClimbList({super.key});
@@ -9,12 +10,19 @@ class ClimbList extends StatefulWidget {
   State<ClimbList> createState() => _ClimbListState();
 }
 
-class _ClimbListState extends State<ClimbList> {
+class _ClimbListState extends State<ClimbList>
+    with AutomaticKeepAliveClientMixin {
   String searchQuery = '';
   int minGrade = 0;
   int maxGrade = 16;
-  bool onlyMine = false; // NEW
+  bool onlyMine = false;
+
+  bool _isLoading = true;
+
   List<Map<String, dynamic>> allClimbs = [];
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -23,33 +31,53 @@ class _ClimbListState extends State<ClimbList> {
   }
 
   Future<void> _fetchClimbs() async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
       final response = await Supabase.instance.client
           .from('climbs')
-          .select('climbid, name, grade, id');
+          .select('climbid, name, grade, id, displayname, private'); // Added 'private'
 
-      if (!mounted) return; // <-- check widget is still in tree
+      if (!mounted) return;
 
       setState(() {
-        allClimbs = List<Map<String, dynamic>>.from(response);
+        allClimbs = List<Map<String, dynamic>>.from(response.reversed);
+        _isLoading = false;
       });
     } catch (e) {
-      print('❌ Error fetching climbs: $e');
+      debugPrint('❌ Error fetching climbs: $e');
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   List<Map<String, dynamic>> get filteredClimbs {
     final userId = Supabase.instance.client.auth.currentUser?.id;
+
     return allClimbs.where((climb) {
-      final nameMatch = climb['name'].toString().toLowerCase().contains(
-        searchQuery.toLowerCase(),
-      );
+      // Check if climb is private - only show if current user is the creator
+      final isPrivate = climb['private'] == true;
+      final isCreator = userId != null && climb['id'] == userId;
+      
+      // If climb is private and user is not the creator, filter it out
+      if (isPrivate && !isCreator) {
+        return false;
+      }
+
+      final nameMatch = climb['name']
+          .toString()
+          .toLowerCase()
+          .contains(searchQuery.toLowerCase());
 
       final gradeStr = climb['grade'] ?? '';
       final gradeNum = _extractGradeNumber(gradeStr);
 
-      final matchesMine =
-          !onlyMine || (userId != null && climb['id'] == userId);
+      final matchesMine = !onlyMine || isCreator;
 
       return nameMatch &&
           gradeNum != null &&
@@ -61,17 +89,12 @@ class _ClimbListState extends State<ClimbList> {
 
   int? _extractGradeNumber(String grade) {
     final match = RegExp(r'V(\d+)').firstMatch(grade.toUpperCase());
-    if (match != null) {
-      return int.tryParse(match.group(1)!);
-    }
-    return null;
+    return match != null ? int.tryParse(match.group(1)!) : null;
   }
 
   void _showFilterDialog() {
-    RangeValues selectedRange = RangeValues(
-      minGrade.toDouble(),
-      maxGrade.toDouble(),
-    );
+    RangeValues selectedRange =
+        RangeValues(minGrade.toDouble(), maxGrade.toDouble());
     bool tempOnlyMine = onlyMine;
 
     showDialog(
@@ -139,92 +162,154 @@ class _ClimbListState extends State<ClimbList> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     final climbs = filteredClimbs;
 
     return Scaffold(
-      body: Column(
-        children: [
-          // Search + Filter row
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Search climbs',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.search),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Search climbs',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          searchQuery = value;
+                        });
+                      },
                     ),
-                    onChanged: (value) {
-                      setState(() {
-                        searchQuery = value;
-                      });
-                    },
                   ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.filter_list),
-                  tooltip: 'Filter by Grade',
-                  onPressed: _showFilterDialog,
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.filter_list),
+                    tooltip: 'Filter by Grade',
+                    onPressed: _showFilterDialog,
+                  ),
+                ],
+              ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create New Climb'),
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ClimbsPage(),
+                      ),
+                    );
+                    _fetchClimbs();
+                  },
+                ),
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : climbs.isEmpty
+                      ? const Center(child: Text('No climbs found.'))
+                      : ListView.builder(
+                          itemCount: climbs.length,
+                          itemBuilder: (context, index) {
+                            final climb = climbs[index];
+                            final isPrivate = climb['private'] == true; // For UI indicator
 
-          // List of climbs
-          Expanded(
-            child: climbs.isEmpty
-                ? const Center(child: Text('No climbs found.'))
-                : ListView.builder(
-                    itemCount: climbs.length,
-                    itemBuilder: (context, index) {
-                      final climb = climbs[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: () {
-                              // default fallback
-                              final gradeStr = climb['grade'] ?? '';
-                              final match = RegExp(
-                                r'V(\d+)',
-                              ).firstMatch(gradeStr.toUpperCase());
-                              final gradeNum = match != null
-                                  ? int.tryParse(match.group(1)!) ?? 0
-                                  : 0;
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: () {
+                                    final gradeStr = climb['grade'] ?? '';
+                                    final match = RegExp(r'V(\d+)')
+                                        .firstMatch(gradeStr.toUpperCase());
+                                    final gradeNum = match != null
+                                        ? int.tryParse(match.group(1)!) ?? 0
+                                        : 0;
 
-                              if (gradeNum <= 4) {
-                                return Colors.green;
-                              } else if (gradeNum <= 8) {
-                                return Colors.blue;
-                              }
-                              return Colors.red;
-                            }(),
-                            child: Text(climb['grade'] ?? '?'),
-                          ),
-
-                          title: Text(climb['name'] ?? 'Unnamed Climb'),
-                          trailing: const Icon(Icons.arrow_forward_ios),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    ClimbDisplay(climbId: climb['climbid']),
+                                    if (gradeNum <= 4) return Colors.green;
+                                    if (gradeNum <= 8) return Colors.blue;
+                                    return Colors.red;
+                                  }(),
+                                  child: Text(climb['grade'] ?? '?'),
+                                ),
+                                title: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            climb['name'] ?? 'Unnamed Climb',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        // Optional: Show lock icon for private climbs
+                                        if (isPrivate) ...[
+                                          const SizedBox(width: 4),
+                                          Icon(
+                                            Icons.lock,
+                                            size: 14,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                    if (climb['displayname'] != null &&
+                                        climb['displayname']
+                                            .toString()
+                                            .isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          'Set by: ${climb['displayname']}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                trailing: const Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                ),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ClimbDisplay(
+                                        climbId: climb['climbid'],
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                             );
                           },
                         ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
