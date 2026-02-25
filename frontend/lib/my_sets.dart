@@ -31,6 +31,7 @@ class _MySetsPageState extends State<MySetsPage> {
           .from('climbs')
           .select('climbid, name, grade, id, displayname')
           .eq('id', userId)
+          .or('draft.is.null,draft.eq.false')
           .order('createdat', ascending: false);
 
       if (!mounted) return;

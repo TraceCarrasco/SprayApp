@@ -13,6 +13,12 @@ class HomeWithNav extends StatefulWidget {
 class _HomeWithNavState extends State<HomeWithNav> {
   int _selectedIndex = 0;
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    precacheImage(const AssetImage('assets/spray_wall.jpeg'), context);
+  }
+
   final List<Widget> _pages = const [
     ProfilePage(),
     ClimbList(),

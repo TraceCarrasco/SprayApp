@@ -39,7 +39,6 @@ class AuthService {
           .select('id')
           .eq('display_name', username)
           .maybeSingle();
-
       return response != null;
     } catch (e) {
       // If profiles table doesn't exist yet or other error, allow attempt
@@ -93,6 +92,26 @@ class AuthService {
   Future<void> signOut() async {
     await _supabase.auth.signOut();
   }
+
+  // Delete account - permanently removes the user
+Future<void> deleteAccount() async {
+  final user = _supabase.auth.currentUser;
+  if (user == null) {
+    throw AuthException('No user logged in');
+  }
+
+  try {
+    // Call the RPC function (no parameters needed)
+    await _supabase.rpc('delete_user');
+  } catch (e) {
+    throw AuthException('Failed to delete account: $e');
+  }
+}
+
+Future<void> deleteUserData(String userId) async {
+  // This is now handled by the RPC function
+  // Remove this method or keep it empty
+}
 
   String? getCurrentEmail() {
     final session = _supabase.auth.currentSession;

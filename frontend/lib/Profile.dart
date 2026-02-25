@@ -3,7 +3,9 @@ import 'package:namer_app/auth_service.dart';
 import 'package:namer_app/my_sets.dart';
 import 'package:namer_app/climb_display.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:namer_app/login_page.dart';
 import 'logbook.dart';
+import 'drafts.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -43,6 +45,13 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  void openDrafts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DraftsPage()),
+    );
+  }
+
   void openAllActivity() {
     Navigator.push(
       context,
@@ -60,6 +69,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadUserData() async {
+    
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
       setState(() {
@@ -68,6 +78,69 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _deleteAccount() async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => const Center(
+      child: Card(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text("Deleting account..."),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  try {
+    await authService.deleteAccount();
+
+    if (mounted) {
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      // Navigate to login page and clear all previous routes
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+      
+      // Show success message after navigation
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("✅ Account deleted successfully"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      });
+    }
+  } catch (e) {
+    debugPrint("Error deleting account: $e");
+    
+    if (mounted) {
+      Navigator.of(context).pop(); // Close loading dialog
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("❌ Error deleting account: $e"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
   Future<void> _loadRecentActivity() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -77,10 +150,21 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       List<Map<String, dynamic>> activities = [];
 
-      final createdClimbs = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, createdat, displayname, private, id')
-          .order('createdat', ascending: false);
+      final results = await Future.wait([
+        Supabase.instance.client
+            .from('climbs')
+            .select('climbid, name, grade, createdat, displayname, private, id')
+            .or('draft.is.null,draft.eq.false')
+            .order('createdat', ascending: false),
+        Supabase.instance.client
+            .from('climbs')
+            .select('climbid, name, grade, ascents, private, id')
+            .not('ascents', 'is', null)
+            .or('draft.is.null,draft.eq.false'),
+      ]);
+
+      final createdClimbs = List<Map<String, dynamic>>.from(results[0]);
+      final climbsWithAscents = List<Map<String, dynamic>>.from(results[1]);
 
       for (final climb in createdClimbs) {
         final isPrivate = climb['private'] == true;
@@ -100,11 +184,6 @@ class _ProfilePageState extends State<ProfilePage> {
           'is_private': isPrivate,
         });
       }
-
-      final climbsWithAscents = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, ascents, private, id')
-          .not('ascents', 'is', null);
 
       for (final climb in climbsWithAscents) {
         final isPrivate = climb['private'] == true;
@@ -209,6 +288,86 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     return null;
   }
+
+void _showDeleteAccountDialog() {
+  final confirmController = TextEditingController();
+  String? errorText;
+
+  showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        return AlertDialog(
+          title: const Text("Delete Account"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "This action cannot be undone. All your data will be permanently deleted:",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text("• Your profile"),
+              const Text("• All climbs you've created"),
+              const Text("• Your logbook entries"),
+              const Text("• All activity history"),
+              const SizedBox(height: 16),
+              Text(
+                'Type "DELETE" to confirm:',
+                style: TextStyle(
+                  color: Colors.red.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: confirmController,
+                decoration: InputDecoration(
+                  hintText: "DELETE",
+                  errorText: errorText,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  if (errorText != null) {
+                    setDialogState(() {
+                      errorText = null;
+                    });
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                final confirmation = confirmController.text.trim();
+                if (confirmation != "DELETE") {
+                  setDialogState(() {
+                    errorText = 'Please type DELETE to confirm';
+                  });
+                  return;
+                }
+
+                Navigator.of(context).pop();
+                _deleteAccount();
+              },
+              child: const Text("Delete Account"),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
 
   void _showEditNameDialog() {
     final controller = TextEditingController(text: username);
@@ -407,6 +566,18 @@ class _ProfilePageState extends State<ProfilePage> {
                   logout();
                 },
               ),
+              const Divider(),
+ListTile(
+  leading: Icon(Icons.delete_forever, color: Colors.red.shade700),
+  title: Text(
+    'Delete Account',
+    style: TextStyle(color: Colors.red.shade700),
+  ),
+  onTap: () {
+    Navigator.pop(context);
+    _showDeleteAccountDialog();
+  },
+),
               const SizedBox(height: 16),
             ],
           ),
@@ -558,6 +729,15 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: openDrafts,
+                      icon: const Icon(Icons.edit_note, size: 18),
+                      label: const Text("Drafts"),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -682,10 +862,21 @@ class _AllActivityPageState extends State<AllActivityPage> {
     try {
       List<Map<String, dynamic>> activities = [];
 
-      final createdClimbs = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, createdat, displayname, private, id')
-          .order('createdat', ascending: false);
+      final results = await Future.wait([
+        Supabase.instance.client
+            .from('climbs')
+            .select('climbid, name, grade, createdat, displayname, private, id')
+            .or('draft.is.null,draft.eq.false')
+            .order('createdat', ascending: false),
+        Supabase.instance.client
+            .from('climbs')
+            .select('climbid, name, grade, ascents, private, id')
+            .not('ascents', 'is', null)
+            .or('draft.is.null,draft.eq.false'),
+      ]);
+
+      final createdClimbs = List<Map<String, dynamic>>.from(results[0]);
+      final climbsWithAscents = List<Map<String, dynamic>>.from(results[1]);
 
       for (final climb in createdClimbs) {
         final isPrivate = climb['private'] == true;
@@ -705,11 +896,6 @@ class _AllActivityPageState extends State<AllActivityPage> {
           'is_private': isPrivate,
         });
       }
-
-      final climbsWithAscents = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, ascents, private, id')
-          .not('ascents', 'is', null);
 
       for (final climb in climbsWithAscents) {
         final isPrivate = climb['private'] == true;

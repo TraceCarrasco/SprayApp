@@ -33,7 +33,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
   @override
   void initState() {
     super.initState();
-    holdsList = holds;
+    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
     _fetchClimbData();
   }
 
@@ -143,7 +143,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
       // Fetch climb data including holds JSONB column and private field
       final climbResponse = await Supabase.instance.client
           .from('climbs')
-          .select('name, grade, holds, displayname, notes, private') // Added 'private'
+          .select('name, grade, holds, displayname, notes, private, ascents')
           .eq('climbid', widget.climbId)
           .maybeSingle();
 
@@ -153,9 +153,8 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         displayName = climbResponse['displayname'] ?? '';
         notes = climbResponse['notes'] ?? '';
         createdByDisplayName = climbResponse['displayname'] ?? '';
-        isPrivate = climbResponse['private'] == true; // Get private status
+        isPrivate = climbResponse['private'] == true;
 
-        // Check if current user is the creator
         final user = Supabase.instance.client.auth.currentUser;
         final currentDisplayName = user?.userMetadata?['display_name'] ?? 'Unknown';
         isCurrentUserCreator = currentDisplayName == createdByDisplayName;
@@ -164,19 +163,29 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         final holdsJson = climbResponse['holds'];
         if (holdsJson != null) {
           final List<dynamic> holdsList = holdsJson is List ? holdsJson : [];
-
           for (final holdData in holdsList) {
             final int arrayIndex = holdData['array_index'] ?? -1;
             final int holdState = holdData['holdstate'] ?? 0;
-
             if (arrayIndex >= 0 && arrayIndex < this.holdsList.length) {
               this.holdsList[arrayIndex].selected = holdState;
             }
           }
         }
-      }
 
-      await _fetchAscents();
+        // Parse ascents inline — no second network call needed
+        final ascentsJson = climbResponse['ascents'];
+        if (ascentsJson != null) {
+          final List<dynamic> ascentsData = List<dynamic>.from(ascentsJson);
+          ascentsData.sort((a, b) {
+            final timestampA = a['timestamp'] ?? '';
+            final timestampB = b['timestamp'] ?? '';
+            return timestampB.compareTo(timestampA);
+          });
+          ascents = List<Map<String, dynamic>>.from(ascentsData);
+        } else {
+          ascents = [];
+        }
+      }
 
       setState(() {
         loading = false;
@@ -358,6 +367,35 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
     );
   }
 
+  void _showInfoDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('Hold Info'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Must have at least 1 start and 1 finish hold.\n'),
+            Text('blue = hand'),
+            Text('orange = foot'),
+            Text('green = start'),
+            Text('purple = finish'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+
   void _showDeleteConfirmation() {
     showDialog(
       context: context,
@@ -446,6 +484,11 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
           ],
         ),
         actions: [
+          IconButton(
+    icon: const Icon(Icons.info_outline),
+    tooltip: "Hold Info",
+    onPressed: () => _showInfoDialog(context),
+  ),
           if (isCurrentUserCreator)
             IconButton(
               icon: const Icon(Icons.settings),
@@ -512,6 +555,14 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                                           width: displayedWidth,
                                           height: displayedHeight,
                                           fit: BoxFit.contain,
+                                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                                            if (wasSynchronouslyLoaded || frame != null) return child;
+                                            return SizedBox(
+                                              width: displayedWidth,
+                                              height: displayedHeight,
+                                              child: const Center(child: CircularProgressIndicator()),
+                                            );
+                                          },
                                         ),
                                         CustomPaint(
                                           size: Size(

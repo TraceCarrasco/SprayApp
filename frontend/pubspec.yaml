@@ -19,6 +19,7 @@ dependencies:
   fl_chart: ^0.68.0
   uuid: ^4.4.0
   firebase_core: ^4.0.0
+  flutter_launcher_icons: ^0.14.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -29,3 +30,8 @@ flutter:
   assets:
     - assets/spray_wall.jpeg
     - assets/FA_logo.png
+
+flutter_launcher_icons:
+  remove_alpha_ios: true
+  ios: true
+  image_path: "assets/FA_logo.png"

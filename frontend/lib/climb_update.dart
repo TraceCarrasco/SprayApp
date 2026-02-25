@@ -29,7 +29,7 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
   @override
   void initState() {
     super.initState();
-    holdsList = holds;
+    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
     _fetchClimbData();
   }
 

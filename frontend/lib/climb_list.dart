@@ -18,8 +18,14 @@ class _ClimbListState extends State<ClimbList>
   bool onlyMine = false;
 
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+  int _offset = 0;
+  static const int _pageSize = 50;
 
   List<Map<String, dynamic>> allClimbs = [];
+
+  final ScrollController _scrollController = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
@@ -27,31 +33,60 @@ class _ClimbListState extends State<ClimbList>
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _fetchClimbs();
   }
 
-  Future<void> _fetchClimbs() async {
-    setState(() {
-      _isLoading = true;
-    });
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 300) {
+      if (!_isLoadingMore && _hasMore) {
+        _fetchClimbs(loadMore: true);
+      }
+    }
+  }
+
+  Future<void> _fetchClimbs({bool loadMore = false}) async {
+    if (loadMore) {
+      if (_isLoadingMore || !_hasMore) return;
+      setState(() => _isLoadingMore = true);
+    } else {
+      setState(() {
+        _isLoading = true;
+        _offset = 0;
+        allClimbs = [];
+      });
+    }
 
     try {
       final response = await Supabase.instance.client
           .from('climbs')
-          .select('climbid, name, grade, id, displayname, private'); // Added 'private'
+          .select('climbid, name, grade, id, displayname, private, draft')
+          .order('createdat', ascending: false)
+          .range(_offset, _offset + _pageSize - 1);
 
       if (!mounted) return;
 
+      final fetched = List<Map<String, dynamic>>.from(response);
       setState(() {
-        allClimbs = List<Map<String, dynamic>>.from(response.reversed);
+        allClimbs.addAll(fetched);
+        _offset += fetched.length;
+        _hasMore = fetched.length == _pageSize;
         _isLoading = false;
+        _isLoadingMore = false;
       });
     } catch (e) {
       debugPrint('❌ Error fetching climbs: $e');
-
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _isLoadingMore = false;
       });
     }
   }
@@ -60,14 +95,12 @@ class _ClimbListState extends State<ClimbList>
     final userId = Supabase.instance.client.auth.currentUser?.id;
 
     return allClimbs.where((climb) {
-      // Check if climb is private - only show if current user is the creator
       final isPrivate = climb['private'] == true;
+      final isDraft = climb['draft'] == true;
       final isCreator = userId != null && climb['id'] == userId;
-      
-      // If climb is private and user is not the creator, filter it out
-      if (isPrivate && !isCreator) {
-        return false;
-      }
+
+      if (isDraft) return false;
+      if (isPrivate && !isCreator) return false;
 
       final nameMatch = climb['name']
           .toString()
@@ -211,7 +244,7 @@ class _ClimbListState extends State<ClimbList>
                         builder: (context) => const ClimbsPage(),
                       ),
                     );
-                    _fetchClimbs();
+                    _fetchClimbs(); // reset + reload from top
                   },
                 ),
               ),
@@ -222,8 +255,17 @@ class _ClimbListState extends State<ClimbList>
                   : climbs.isEmpty
                       ? const Center(child: Text('No climbs found.'))
                       : ListView.builder(
-                          itemCount: climbs.length,
+                          controller: _scrollController,
+                          itemCount: climbs.length + (_isLoadingMore ? 1 : 0),
                           itemBuilder: (context, index) {
+                            if (index == climbs.length) {
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
                             final climb = climbs[index];
                             final isPrivate = climb['private'] == true; // For UI indicator
 

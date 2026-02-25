@@ -22,7 +22,16 @@ class _ClimbsPageState extends State<ClimbsPage> {
   @override
   void initState() {
     super.initState();
-    holdsList = holds;
+    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
+  }
+
+  @override
+  void dispose() {
+    for (final hold in holdsList) {
+      hold.selected = 0;
+    }
+    selectedHolds.clear();
+    super.dispose();
   }
 
   String generateUuid() {
@@ -65,12 +74,42 @@ class _ClimbsPageState extends State<ClimbsPage> {
     });
   }
 
+  void _showInfoDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: const Text('How to Set Holds'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Must have at least 1 start and 1 finish hold.\n'),
+            Text('1 tap (blue) = hand'),
+            Text('2 tap (orange) = foot'),
+            Text('3 tap (green) = start'),
+            Text('4 tap (purple) = finish'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+
   Future<void> _insertClimbs(
     String name,
     String grade,
     List<Map<String, dynamic>> holds,
     String climbDescription,
     bool isPrivate,
+    bool isDraft,
   ) async {
     String climbId = generateUuid();
     final user = Supabase.instance.client.auth.currentUser;
@@ -90,6 +129,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
         'displayname': displayName,
         'holds': holds,
         'private': isPrivate,
+        'draft': isDraft,
         'createdat': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -110,15 +150,24 @@ class _ClimbsPageState extends State<ClimbsPage> {
     final imageAspectRatio = originalImageWidth / originalImageHeight;
 
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text('Frogs'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
+appBar: AppBar(
+  leading: IconButton(
+    icon: const Icon(Icons.arrow_back),
+    onPressed: () => Navigator.pop(context),
+  ),
+  title: const Text(''),
+  backgroundColor: Colors.transparent,
+  elevation: 0,
+  actions: [
+    IconButton(
+      icon: const Icon(Icons.info_outline),
+      onPressed: () {
+        _showInfoDialog(context);
+      },
+    ),
+  ],
+),
+
       body: LayoutBuilder(
         builder: (context, constraints) {
           final displayedWidth = constraints.maxWidth;
@@ -145,6 +194,14 @@ class _ClimbsPageState extends State<ClimbsPage> {
                             width: displayedWidth,
                             height: displayedHeight,
                             fit: BoxFit.fill,
+                            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                              if (wasSynchronouslyLoaded || frame != null) return child;
+                              return SizedBox(
+                                width: displayedWidth,
+                                height: displayedHeight,
+                                child: const Center(child: CircularProgressIndicator()),
+                              );
+                            },
                           ),
                           CustomPaint(
                             size: displayedSize,
@@ -200,6 +257,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
     String climbDescription = '';
     String climbGrade = '';
     bool isPrivate = _isPrivate;
+    bool isDraft = false;
 
     showModalBottomSheet(
       context: context,
@@ -274,6 +332,21 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           contentPadding: EdgeInsets.zero,
                           controlAffinity: ListTileControlAffinity.leading,
                         ),
+                        CheckboxListTile(
+                          title: const Text('Save as Draft'),
+                          subtitle: const Text(
+                            'Save without publishing — edit and publish later',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          value: isDraft,
+                          onChanged: (value) {
+                            setModalState(() {
+                              isDraft = value ?? false;
+                            });
+                          },
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
                       ],
                     );
                   },
@@ -327,6 +400,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           holdData,
                           climbDescription,
                           isPrivate,
+                          isDraft,
                         );
                         Navigator.pop(context);
                       },
