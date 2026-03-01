@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'draft_edit.dart';
+import 'climb_update.dart';
 
 class DraftsPage extends StatefulWidget {
   const DraftsPage({super.key});
@@ -51,10 +51,12 @@ class _DraftsPageState extends State<DraftsPage> {
   }
 
   Color _gradeColor(String grade) {
-    final gradeNum = _extractGradeNumber(grade);
-    if (gradeNum <= 4) return Colors.green;
-    if (gradeNum <= 8) return Colors.blue;
-    return Colors.red;
+    final n = _extractGradeNumber(grade);
+    if (n >= 9) return Colors.red;
+    if (n >= 7) return Colors.orange;
+    if (n >= 4) return Colors.blue;
+    if (n >= 3) return Colors.green;
+    return Colors.yellow.shade700;
   }
 
   @override
@@ -132,8 +134,9 @@ class _DraftsPageState extends State<DraftsPage> {
                             await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => DraftEditPage(
+                                builder: (context) => ClimbUpdatePage(
                                   climbId: draft['climbid'],
+                                  isDraft: true,
                                 ),
                               ),
                             );

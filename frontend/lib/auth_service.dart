@@ -113,6 +113,13 @@ Future<void> deleteUserData(String userId) async {
   // Remove this method or keep it empty
 }
 
+  Future<void> sendPasswordResetEmail(String email) async {
+    await _supabase.auth.resetPasswordForEmail(
+      email,
+      redirectTo: 'com.faspraywall.fahumboldtspraywall://login-callback',
+    );
+  }
+
   String? getCurrentEmail() {
     final session = _supabase.auth.currentSession;
     final user = session?.user;

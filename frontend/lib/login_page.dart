@@ -15,6 +15,53 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  void _showForgotPasswordDialog() {
+    final emailController = TextEditingController(text: _emailController.text);
+    final messenger = ScaffoldMessenger.of(context);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset Password'),
+        content: TextField(
+          controller: emailController,
+          decoration: const InputDecoration(labelText: 'Email'),
+          keyboardType: TextInputType.emailAddress,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              Navigator.pop(dialogContext);
+              try {
+                await authService.sendPasswordResetEmail(email);
+                if (mounted) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Password reset email sent!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Send Reset Email'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _submitLogin() async {
     final email = _emailController.text;
     final password = _passwordController.text;
@@ -67,7 +114,14 @@ class _LoginPageState extends State<LoginPage> {
                     onPressed: _submitLogin,
                     child: const Text("Login"),
                   ),
-                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _showForgotPasswordDialog,
+                      child: const Text("Forgot your password?"),
+                    ),
+                  ),
+
                   Center(
                     child: SizedBox(
                       width: MediaQuery.of(context).size.width * 0.4,

@@ -10,12 +10,16 @@ class ClimbList extends StatefulWidget {
   State<ClimbList> createState() => _ClimbListState();
 }
 
+enum _SortOption { newest, oldest, mostSends, hardest, easiest }
+
 class _ClimbListState extends State<ClimbList>
     with AutomaticKeepAliveClientMixin {
   String searchQuery = '';
   int minGrade = 0;
   int maxGrade = 16;
-  bool onlyMine = false;
+  _SortOption _sortOption = _SortOption.mostSends;
+  String? _selectedSetter;
+  List<String> _setters = [];
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -35,6 +39,7 @@ class _ClimbListState extends State<ClimbList>
     super.initState();
     _scrollController.addListener(_onScroll);
     _fetchClimbs();
+    _fetchSetters();
   }
 
   @override
@@ -52,6 +57,24 @@ class _ClimbListState extends State<ClimbList>
     }
   }
 
+  Future<void> _fetchSetters() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('climbs')
+          .select('displayname');
+      if (!mounted) return;
+      final names = List<Map<String, dynamic>>.from(response)
+          .map((r) => r['displayname']?.toString() ?? '')
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      setState(() => _setters = names);
+    } catch (e) {
+      debugPrint('Error fetching setters: $e');
+    }
+  }
+
   Future<void> _fetchClimbs({bool loadMore = false}) async {
     if (loadMore) {
       if (_isLoadingMore || !_hasMore) return;
@@ -65,19 +88,33 @@ class _ClimbListState extends State<ClimbList>
     }
 
     try {
-      final response = await Supabase.instance.client
+      dynamic base = Supabase.instance.client
           .from('climbs')
-          .select('climbid, name, grade, id, displayname, private, draft')
-          .order('createdat', ascending: false)
-          .range(_offset, _offset + _pageSize - 1);
+          .select('climbid, name, grade, id, displayname, private, draft, sends, ascents');
+
+      if (_selectedSetter != null) {
+        base = base.eq('displayname', _selectedSetter!);
+      }
+
+      final response = await switch (_sortOption) {
+        _SortOption.newest =>
+          base.order('createdat', ascending: false).range(_offset, _offset + _pageSize - 1),
+        _SortOption.oldest =>
+          base.order('createdat', ascending: true).range(_offset, _offset + _pageSize - 1),
+        _SortOption.mostSends || _SortOption.hardest || _SortOption.easiest =>
+          base.order('createdat', ascending: false),
+      };
 
       if (!mounted) return;
 
       final fetched = List<Map<String, dynamic>>.from(response);
+      final isClientSort = _sortOption == _SortOption.hardest ||
+          _sortOption == _SortOption.easiest ||
+          _sortOption == _SortOption.mostSends;
       setState(() {
         allClimbs.addAll(fetched);
         _offset += fetched.length;
-        _hasMore = fetched.length == _pageSize;
+        _hasMore = isClientSort ? false : fetched.length == _pageSize;
         _isLoading = false;
         _isLoadingMore = false;
       });
@@ -110,14 +147,34 @@ class _ClimbListState extends State<ClimbList>
       final gradeStr = climb['grade'] ?? '';
       final gradeNum = _extractGradeNumber(gradeStr);
 
-      final matchesMine = !onlyMine || isCreator;
+      // '?' grade (gradeNum == null) always passes the grade range filter
+      final gradeMatch =
+          gradeNum == null || (gradeNum >= minGrade && gradeNum <= maxGrade);
 
-      return nameMatch &&
-          gradeNum != null &&
-          gradeNum >= minGrade &&
-          gradeNum <= maxGrade &&
-          matchesMine;
-    }).toList();
+      return nameMatch && gradeMatch;
+    }).toList()
+      ..sort((a, b) {
+        if (_sortOption == _SortOption.hardest || _sortOption == _SortOption.easiest) {
+          final diff = _computeGradeValue(a).compareTo(_computeGradeValue(b));
+          return _sortOption == _SortOption.hardest ? -diff : diff;
+        }
+        if (_sortOption == _SortOption.mostSends) {
+          final sendsA = ((a['ascents'] as List<dynamic>?) ?? []).length;
+          final sendsB = ((b['ascents'] as List<dynamic>?) ?? []).length;
+          return sendsB.compareTo(sendsA);
+        }
+        return 0;
+      });
+  }
+
+  int _computeGradeValue(Map<String, dynamic> climb) {
+    final grades = ((climb['ascents'] as List<dynamic>?) ?? [])
+        .map((a) => a['grade_feel'])
+        .whereType<num>()
+        .map((g) => g.toInt())
+        .toList();
+    if (grades.isEmpty) return _extractGradeNumber(climb['grade'] ?? '') ?? 0;
+    return (grades.reduce((a, b) => a + b) / grades.length).ceil();
   }
 
   int? _extractGradeNumber(String grade) {
@@ -128,63 +185,149 @@ class _ClimbListState extends State<ClimbList>
   void _showFilterDialog() {
     RangeValues selectedRange =
         RangeValues(minGrade.toDouble(), maxGrade.toDouble());
-    bool tempOnlyMine = onlyMine;
+    _SortOption tempSort = _sortOption;
+    String? tempSetter = _selectedSetter;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Filter by Grade'),
+        title: const Text('Filter & Sort'),
         content: StatefulBuilder(
           builder: (context, setStateDialog) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RangeSlider(
-                  min: 0,
-                  max: 16,
-                  divisions: 16,
-                  labels: RangeLabels(
-                    'V${selectedRange.start.round()}',
-                    'V${selectedRange.end.round()}',
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Grade Range',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  RangeSlider(
+                    min: 0,
+                    max: 16,
+                    divisions: 16,
+                    labels: RangeLabels(
+                      'V${selectedRange.start.round()}',
+                      'V${selectedRange.end.round()}',
+                    ),
+                    values: selectedRange,
+                    onChanged: (newRange) {
+                      setStateDialog(() {
+                        selectedRange = newRange;
+                      });
+                    },
                   ),
-                  values: selectedRange,
-                  onChanged: (newRange) {
-                    setStateDialog(() {
-                      selectedRange = newRange;
-                    });
-                  },
-                ),
-                Text(
-                  'From V${selectedRange.start.round()} to V${selectedRange.end.round()}',
-                ),
-                const SizedBox(height: 10),
-                CheckboxListTile(
-                  title: const Text('Set By Me'),
-                  value: tempOnlyMine,
-                  onChanged: (value) {
-                    setStateDialog(() {
-                      tempOnlyMine = value ?? false;
-                    });
-                  },
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-              ],
+                  Text(
+                    'From V${selectedRange.start.round()} to V${selectedRange.end.round()}',
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Sort By',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  DropdownButton<_SortOption>(
+                    value: tempSort,
+                    isExpanded: true,
+                    items: const [
+                      DropdownMenuItem(
+                        value: _SortOption.newest,
+                        child: Text('Newest'),
+                      ),
+                      DropdownMenuItem(
+                        value: _SortOption.oldest,
+                        child: Text('Oldest'),
+                      ),
+                      DropdownMenuItem(
+                        value: _SortOption.mostSends,
+                        child: Text('Most Sends'),
+                      ),
+                      DropdownMenuItem(
+                        value: _SortOption.hardest,
+                        child: Text('Hardest'),
+                      ),
+                      DropdownMenuItem(
+                        value: _SortOption.easiest,
+                        child: Text('Easiest'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setStateDialog(() => tempSort = value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Set By',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Autocomplete<String>(
+                    initialValue:
+                        TextEditingValue(text: tempSetter ?? ''),
+                    optionsBuilder: (TextEditingValue value) {
+                      if (value.text.isEmpty) return _setters;
+                      return _setters.where((name) => name
+                          .toLowerCase()
+                          .contains(value.text.toLowerCase()));
+                    },
+                    onSelected: (String selection) {
+                      setStateDialog(() => tempSetter = selection);
+                    },
+                    fieldViewBuilder:
+                        (context, controller, focusNode, onSubmitted) {
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          hintText: 'All Setters',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
+                        ),
+                        onChanged: (v) {
+                          if (v.isEmpty) {
+                            setStateDialog(() => tempSetter = null);
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ],
+              ),
             );
           },
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              final needsRefetch = _sortOption != _SortOption.mostSends ||
+                  _selectedSetter != null;
+              setState(() {
+                minGrade = 0;
+                maxGrade = 16;
+                _sortOption = _SortOption.mostSends;
+                _selectedSetter = null;
+              });
+              Navigator.pop(context);
+              if (needsRefetch) _fetchClimbs();
+            },
+            child: const Text('Reset'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () {
+              final newMin = selectedRange.start.round();
+              final newMax = selectedRange.end.round();
+              final needsRefetch = tempSort != _sortOption ||
+                  tempSetter != _selectedSetter;
               setState(() {
-                minGrade = selectedRange.start.round();
-                maxGrade = selectedRange.end.round();
-                onlyMine = tempOnlyMine;
+                minGrade = newMin;
+                maxGrade = newMax;
+                _sortOption = tempSort;
+                _selectedSetter = tempSetter;
               });
               Navigator.pop(context);
+              if (needsRefetch) _fetchClimbs();
             },
             child: const Text('Apply'),
           ),
@@ -267,7 +410,15 @@ class _ClimbListState extends State<ClimbList>
                               );
                             }
                             final climb = climbs[index];
-                            final isPrivate = climb['private'] == true; // For UI indicator
+                            final isPrivate = climb['private'] == true;
+                            final grades = ((climb['ascents'] as List<dynamic>?) ?? [])
+                                .map((a) => a['grade_feel'])
+                                .whereType<num>()
+                                .map((g) => g.toInt())
+                                .toList();
+                            final displayGrade = grades.isEmpty
+                                ? (climb['grade'] ?? '?')
+                                : 'V${(grades.reduce((a, b) => a + b) / grades.length).ceil()}';
 
                             return Card(
                               margin: const EdgeInsets.symmetric(
@@ -277,18 +428,18 @@ class _ClimbListState extends State<ClimbList>
                               child: ListTile(
                                 leading: CircleAvatar(
                                   backgroundColor: () {
-                                    final gradeStr = climb['grade'] ?? '';
                                     final match = RegExp(r'V(\d+)')
-                                        .firstMatch(gradeStr.toUpperCase());
-                                    final gradeNum = match != null
+                                        .firstMatch(displayGrade.toUpperCase());
+                                    final n = match != null
                                         ? int.tryParse(match.group(1)!) ?? 0
                                         : 0;
-
-                                    if (gradeNum <= 4) return Colors.green;
-                                    if (gradeNum <= 8) return Colors.blue;
-                                    return Colors.red;
+                                    if (n >= 9) return Colors.red;
+                                    if (n >= 7) return Colors.orange;
+                                    if (n >= 4) return Colors.blue;
+                                    if (n >= 3) return Colors.green;
+                                    return Colors.yellow.shade700;
                                   }(),
-                                  child: Text(climb['grade'] ?? '?'),
+                                  child: Text(displayGrade),
                                 ),
                                 title: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -329,14 +480,24 @@ class _ClimbListState extends State<ClimbList>
                                           ),
                                         ),
                                       ),
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        'Total sends: ${climb['sends'] ?? 0}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 trailing: const Icon(
                                   Icons.arrow_forward_ios,
                                   size: 16,
                                 ),
-                                onTap: () {
-                                  Navigator.push(
+                                onTap: () async {
+                                  await Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => ClimbDisplay(
@@ -344,6 +505,7 @@ class _ClimbListState extends State<ClimbList>
                                       ),
                                     ),
                                   );
+                                  _fetchClimbs();
                                 },
                               ),
                             );

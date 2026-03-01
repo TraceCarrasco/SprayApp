@@ -110,6 +110,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
     String climbDescription,
     bool isPrivate,
     bool isDraft,
+    bool isSent,
   ) async {
     String climbId = generateUuid();
     final user = Supabase.instance.client.auth.currentUser;
@@ -118,6 +119,19 @@ class _ClimbsPageState extends State<ClimbsPage> {
 
     final displayName =
         userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
+
+    final List<Map<String, dynamic>> ascents = isSent
+        ? [
+            {
+              'user_id': user?.id,
+              'username': displayName,
+              'attempts': null,
+              'grade_feel': null,
+              'is_flash': false,
+              'timestamp': DateTime.now().toIso8601String(),
+            }
+          ]
+        : [];
 
     try {
       await Supabase.instance.client.from('climbs').insert({
@@ -131,6 +145,8 @@ class _ClimbsPageState extends State<ClimbsPage> {
         'private': isPrivate,
         'draft': isDraft,
         'createdat': DateTime.now().toIso8601String(),
+        if (isSent) 'ascents': ascents,
+        if (isSent) 'sends': 1,
       });
     } catch (e) {
       debugPrint("Error inserting climb: $e");
@@ -258,6 +274,7 @@ appBar: AppBar(
     String climbGrade = '';
     bool isPrivate = _isPrivate;
     bool isDraft = false;
+    bool isSent = false;
 
     showModalBottomSheet(
       context: context,
@@ -302,10 +319,10 @@ appBar: AppBar(
                         ),
                         Slider(
                           value: _sliderValue.toDouble(),
-                          min: 0,
+                          min: -1,
                           max: 17,
-                          divisions: 17,
-                          label: 'V$_sliderValue',
+                          divisions: 18,
+                          label: _sliderValue == -1 ? '?' : 'V$_sliderValue',
                           onChanged: (newValue) {
                             setModalState(() {
                               _sliderValue = newValue.round();
@@ -314,7 +331,9 @@ appBar: AppBar(
                         ),
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Selected Grade: V$_sliderValue'),
+                          child: Text(
+                            'Selected Grade: ${_sliderValue == -1 ? '?' : 'V$_sliderValue'}',
+                          ),
                         ),
                         const SizedBox(height: 8),
                         CheckboxListTile(
@@ -327,6 +346,21 @@ appBar: AppBar(
                           onChanged: (value) {
                             setModalState(() {
                               isPrivate = value ?? false;
+                            });
+                          },
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                        CheckboxListTile(
+                          title: const Text('Sent'),
+                          subtitle: const Text(
+                            'Mark that you have sent this climb',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          value: isSent,
+                          onChanged: (value) {
+                            setModalState(() {
+                              isSent = value ?? false;
                             });
                           },
                           contentPadding: EdgeInsets.zero,
@@ -365,7 +399,7 @@ appBar: AppBar(
                         if (!formKey.currentState!.validate()) return;
 
                         formKey.currentState!.save();
-                        climbGrade = 'V$_sliderValue';
+                        climbGrade = _sliderValue == -1 ? '?' : 'V$_sliderValue';
 
                         final List<Map<String, dynamic>> holdData = [];
                         bool hasStart = false;
@@ -401,6 +435,7 @@ appBar: AppBar(
                           climbDescription,
                           isPrivate,
                           isDraft,
+                          isSent,
                         );
                         Navigator.pop(context);
                       },
@@ -438,17 +473,17 @@ class _HtmlMapPainter extends CustomPainter {
 
       final fillPaint = Paint()
         ..color = switch (hold.selected) {
-          1 => Colors.blue.withOpacity(0.5),
-          2 => Colors.orange.withOpacity(0.5),
-          3 => Colors.green.withOpacity(0.5),
-          4 => Colors.purple.withOpacity(0.5),
+          1 => Colors.blue.withValues(alpha: 0.75),
+          2 => Colors.orange.withValues(alpha: 0.75),
+          3 => Colors.green.withValues(alpha: 0.75),
+          4 => Colors.purple.withValues(alpha: 0.75),
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;
 
       final strokePaint = Paint()
         ..color = Colors.white
-        ..strokeWidth = 2
+        ..strokeWidth = 1
         ..style = PaintingStyle.stroke;
 
       canvas.drawPath(path, fillPaint);
