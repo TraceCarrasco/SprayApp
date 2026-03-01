@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SprayApp – Changelog</title>
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --border: #2a2a2a;
+      --accent: #4f8ef7;
+      --text: #e8e8e8;
+      --muted: #888;
+      --tag-bg: #1e2d4a;
+      --tag-text: #7ab3ff;
+      --new: #1a3a1a;
+      --new-text: #6fcf6f;
+      --fix: #3a1a1a;
+      --fix-text: #f07070;
+      --improve: #2a2a1a;
+      --improve-text: #d4b860;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 32px 24px 24px;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    header h1 span { color: var(--accent); }
+    header p { color: var(--muted); margin-top: 6px; font-size: 0.95rem; }
+    main { max-width: 780px; margin: 0 auto; padding: 0 24px 64px; }
+    .release {
+      margin-top: 48px;
+    }
+    .release-header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .release-header h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    .release-date {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .badge-latest { background: var(--accent); color: #fff; }
+    .section-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 20px 0 8px;
+    }
+    ul {
+      list-style: none;
+    }
+    ul li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 14px;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 0.92rem;
+    }
+    ul li .tag {
+      flex-shrink: 0;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+    .tag-new { background: var(--new); color: var(--new-text); }
+    .tag-fix { background: var(--fix); color: var(--fix-text); }
+    .tag-improve { background: var(--improve); color: var(--improve-text); }
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+    }
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Spray<span>App</span> Changelog</h1>
+    <p>What's new, fixed, and improved in each update.</p>
+  </header>
+
+  <main>
+
+    <!-- ── v0.4 ── -->
+    <div class="release">
+      <div class="release-header">
+        <h2>v0.4 — Leaderboard &amp; Profiles</h2>
+        <span class="badge badge-latest">Latest</span>
+        <span class="release-date">March 2026</span>
+      </div>
+
+      <p class="section-title">New Features</p>
+      <ul>
+        <li><span class="tag tag-new">New</span>Leaderboard on the profile page with <strong>Setters</strong> and <strong>Sends</strong> tabs, showing the top 10 in each category.</li>
+        <li><span class="tag tag-new">New</span>Setters ranked by score = <em>likes × 2 + (likes / climbs) × 10</em> — likes are weighted above raw volume.</li>
+        <li><span class="tag tag-new">New</span>Sends ranked by number of sends; hardest grade shown as a reference column.</li>
+        <li><span class="tag tag-new">New</span>Tapping any name in the leaderboard navigates to that user's profile page.</li>
+        <li><span class="tag tag-new">New</span>Liked / ❤ system — heart button left of the Log Ascent button. Likes are counted per setter on the leaderboard.</li>
+        <li><span class="tag tag-new">New</span>Setter name in the climb display is now bold and tappable — opens the setter's profile page.</li>
+        <li><span class="tag tag-new">New</span>User profile page showing problems set (with count, tappable to full list) and full logbook-style send history.</li>
+        <li><span class="tag tag-new">New</span>Sent checkbox when creating a climb — logs an ascent at creation time.</li>
+        <li><span class="tag tag-new">New</span>Sort by Hardest and Easiest added to the climb list.</li>
+      </ul>
+
+      <p class="section-title">Improvements</p>
+      <ul>
+        <li><span class="tag tag-improve">Improve</span>Recent activity + leaderboard section is now fully scrollable together.</li>
+        <li><span class="tag tag-improve">Improve</span>Default climb list sort changed to Most Sends.</li>
+        <li><span class="tag tag-improve">Improve</span>Leaderboard displays as a clean table (Name | Likes | Climbs / Name | Hardest | Sends) with numbered ranks.</li>
+        <li><span class="tag tag-improve">Improve</span>Most Sends sort now uses real ascent array length instead of a stale counter column.</li>
+        <li><span class="tag tag-improve">Improve</span>Removed redundant "Set by:" text below the Log Ascent button.</li>
+        <li><span class="tag tag-improve">Improve</span>Ascents / comments panel moved higher (60/40 split with the climb image).</li>
+      </ul>
+
+      <p class="section-title">Bug Fixes</p>
+      <ul>
+        <li><span class="tag tag-fix">Fix</span>Duplicate-key error when double-tapping the bookmark — fixed with an optimistic state update.</li>
+        <li><span class="tag tag-fix">Fix</span>Overflow error on profile page from unbounded ListView — replaced with bounded scrollable layout.</li>
+        <li><span class="tag tag-fix">Fix</span>Likes not counting in leaderboard because liked climbs were filtered by RLS — setter name is now stored directly in <code>liked_climbs</code> at insert time.</li>
+      </ul>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ── v0.3 ── -->
+    <div class="release">
+      <div class="release-header">
+        <h2>v0.3 — Grade Overhaul &amp; Sorting</h2>
+        <span class="release-date">Early 2026</span>
+      </div>
+
+      <p class="section-title">New Features</p>
+      <ul>
+        <li><span class="tag tag-new">New</span>Unified grade display — grade shows setter's grade until ascents are logged, then shows the ceiling average of all grade-feel votes.</li>
+        <li><span class="tag tag-new">New</span>Same grade logic applied to the climb list cards.</li>
+        <li><span class="tag tag-new">New</span>Save / bookmark climbs from the climb detail page.</li>
+        <li><span class="tag tag-new">New</span>Drafts feature — save climbs as drafts before publishing.</li>
+        <li><span class="tag tag-new">New</span>Pagination on the climb list for faster load times.</li>
+      </ul>
+
+      <p class="section-title">Improvements</p>
+      <ul>
+        <li><span class="tag tag-improve">Improve</span>AppBar redesigned to show climb name, setter, and grade in a multi-line layout.</li>
+        <li><span class="tag tag-improve">Improve</span>Bookmark moved to the body next to Log Ascent (Log Ascent centered, bookmark on the right).</li>
+        <li><span class="tag tag-improve">Improve</span>Delete button on ascent cards repositioned further right for easier tapping.</li>
+        <li><span class="tag tag-improve">Improve</span>Performance improvements across climb list loading.</li>
+      </ul>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ── v0.2 ── -->
+    <div class="release">
+      <div class="release-header">
+        <h2>v0.2 — Logbook &amp; Social</h2>
+        <span class="release-date">2025</span>
+      </div>
+      <ul>
+        <li><span class="tag tag-new">New</span>Logbook page — total sends, hardest send, hardest flash, full send history.</li>
+        <li><span class="tag tag-new">New</span>Send graph on profile page.</li>
+        <li><span class="tag tag-new">New</span>My Sets page to view all climbs you've created.</li>
+        <li><span class="tag tag-new">New</span>Scalable text for climb display and hold labels.</li>
+        <li><span class="tag tag-improve">Improve</span>Mobile UI tweaks — layout adapted for smaller screens.</li>
+        <li><span class="tag tag-fix">Fix</span>Fixed user display name across ascents and profile.</li>
+      </ul>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- ── v0.1 ── -->
+    <div class="release">
+      <div class="release-header">
+        <h2>v0.1 — Initial Release</h2>
+        <span class="release-date">2025</span>
+      </div>
+      <ul>
+        <li><span class="tag tag-new">New</span>Create, view, and log ascents on climbing problems.</li>
+        <li><span class="tag tag-new">New</span>Interactive hold placement on climb images.</li>
+        <li><span class="tag tag-new">New</span>Flash / send logging with grade-feel voting.</li>
+        <li><span class="tag tag-new">New</span>User authentication and display names.</li>
+        <li><span class="tag tag-new">New</span>Profile page with recent activity feed.</li>
+      </ul>
+    </div>
+
+  </main>
+
+  <footer>SprayApp · <a href="https://github.com/WilliamCastner/SprayApp" style="color:var(--accent);text-decoration:none;">GitHub</a></footer>
+</body>
+</html>
