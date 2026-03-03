@@ -10,8 +10,15 @@ const double originalImageHeight = 4284;
 
 class ClimbDisplay extends StatefulWidget {
   final String climbId;
+  final List<String> climbIds;
+  final int currentIndex;
 
-  const ClimbDisplay({super.key, required this.climbId});
+  const ClimbDisplay({
+    super.key,
+    required this.climbId,
+    this.climbIds = const [],
+    this.currentIndex = 0,
+  });
 
   @override
   State<ClimbDisplay> createState() => _ClimbDisplayState();
@@ -117,6 +124,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
   @override
   void dispose() {
     _tabController.dispose();
+
     for (final hold in holdsList) {
       hold.selected = 0;
     }
@@ -180,7 +188,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
         'username': displayName,
         'attempts': attempts,
         'grade_feel': gradeFeel,
-        'is_flash': attempts == 0,
+        'is_flash': attempts == 0 || attempts == 1,
         'timestamp': DateTime.now().toIso8601String(),
       };
 
@@ -366,9 +374,9 @@ class _ClimbDisplayState extends State<ClimbDisplay>
 
   String _getAttemptsDisplayText(int? attempts) {
     if (attempts == null) return '';
-    if (attempts == 0) return 'Flash';
+    if (attempts == 0 || attempts == 1) return 'Flash';
     if (attempts == 31) return '30+ attempts';
-    return '$attempts attempt${attempts == 1 ? '' : 's'}';
+    return '$attempts attempts';
   }
 
   String _formatTimestamp(String? timestamp) {
@@ -847,6 +855,8 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                       return Column(
                         children: [
                           // TOP 2/3: Image + Log Button
+                          Stack(
+                            children: [
                           SizedBox(
                             height: imageAreaHeight,
                             child: Column(
@@ -943,7 +953,51 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                               ],
                             ),
                           ),
-
+                          // Left arrow
+                          if (widget.climbIds.length > 1 && widget.currentIndex > 0)
+                            Positioned(
+                              left: 4,
+                              top: 0,
+                              bottom: 60,
+                              child: Center(
+                                child: _NavArrowButton(
+                                  icon: Icons.chevron_left,
+                                  onTap: () => Navigator.pushReplacement(
+                                    context,
+                                    _slideRoute(
+                                      widget.climbIds[widget.currentIndex - 1],
+                                      widget.climbIds,
+                                      widget.currentIndex - 1,
+                                      fromRight: false,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // Right arrow
+                          if (widget.climbIds.length > 1 &&
+                              widget.currentIndex < widget.climbIds.length - 1)
+                            Positioned(
+                              right: 4,
+                              top: 0,
+                              bottom: 60,
+                              child: Center(
+                                child: _NavArrowButton(
+                                  icon: Icons.chevron_right,
+                                  onTap: () => Navigator.pushReplacement(
+                                    context,
+                                    _slideRoute(
+                                      widget.climbIds[widget.currentIndex + 1],
+                                      widget.climbIds,
+                                      widget.currentIndex + 1,
+                                      fromRight: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          ),
                           // BOTTOM 1/3: Ascents / Comments tabs
                           SizedBox(
                             height: ascentsAreaHeight,
@@ -1145,6 +1199,21 @@ class _ClimbDisplayState extends State<ClimbDisplay>
     );
   }
 
+  PageRouteBuilder<void> _slideRoute(
+      String climbId, List<String> ids, int index,
+      {required bool fromRight}) {
+    return PageRouteBuilder(
+      pageBuilder: (_, __, ___) => ClimbDisplay(
+        climbId: climbId,
+        climbIds: ids,
+        currentIndex: index,
+      ),
+      transitionsBuilder: (_, __, ___, child) => child,
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+    );
+  }
+
   void _sendForm(BuildContext context, int initialGrade) {
     int attemptsSliderValue = 1;
     int gradeSliderValue = initialGrade;
@@ -1266,6 +1335,28 @@ class _ClimbDisplayState extends State<ClimbDisplay>
           ),
         );
       },
+    );
+  }
+}
+
+class _NavArrowButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _NavArrowButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
     );
   }
 }

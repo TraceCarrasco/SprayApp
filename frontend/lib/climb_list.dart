@@ -497,11 +497,17 @@ class _ClimbListState extends State<ClimbList>
                                   size: 16,
                                 ),
                                 onTap: () async {
+                                  final ids = filteredClimbs
+                                      .map((c) => c['climbid'].toString())
+                                      .toList();
+                                  final idx = ids.indexOf(climb['climbid'].toString());
                                   await Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => ClimbDisplay(
                                         climbId: climb['climbid'],
+                                        climbIds: ids,
+                                        currentIndex: idx < 0 ? 0 : idx,
                                       ),
                                     ),
                                   );

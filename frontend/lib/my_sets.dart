@@ -131,11 +131,17 @@ class _MySetsPageState extends State<MySetsPage> {
                                   size: 16,
                                 ),
                                 onTap: () {
+                                  final ids = myClimbs
+                                      .map((c) => c['climbid'].toString())
+                                      .toList();
+                                  final idx = ids.indexOf(climb['climbid'].toString());
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => ClimbDisplay(
                                         climbId: climb['climbid'],
+                                        climbIds: ids,
+                                        currentIndex: idx < 0 ? 0 : idx,
                                       ),
                                     ),
                                   );

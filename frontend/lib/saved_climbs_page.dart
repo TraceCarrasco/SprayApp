@@ -116,11 +116,17 @@ class _SavedClimbsPageState extends State<SavedClimbsPage> {
                           trailing: const Icon(Icons.arrow_forward_ios,
                               size: 16),
                           onTap: () async {
+                            final ids = _savedClimbs
+                                .map((c) => c['climbid'].toString())
+                                .toList();
+                            final idx = ids.indexOf(row['climbid'].toString());
                             await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => ClimbDisplay(
                                   climbId: row['climbid'],
+                                  climbIds: ids,
+                                  currentIndex: idx < 0 ? 0 : idx,
                                 ),
                               ),
                             );

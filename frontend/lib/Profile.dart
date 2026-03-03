@@ -73,10 +73,21 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _openClimb(BuildContext context, String climbId) {
+    final seenIds = <String>{};
+    final climbIds = <String>[];
+    for (final a in recentActivity) {
+      final id = a['climb_id']?.toString() ?? '';
+      if (id.isNotEmpty && seenIds.add(id)) climbIds.add(id);
+    }
+    final index = climbIds.indexOf(climbId);
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ClimbDisplay(climbId: climbId),
+        builder: (_) => ClimbDisplay(
+          climbId: climbId,
+          climbIds: climbIds,
+          currentIndex: index < 0 ? 0 : index,
+        ),
       ),
     );
   }
@@ -215,6 +226,7 @@ class _ProfilePageState extends State<ProfilePage> {
             'grade': climb['grade'] ?? '',
             'timestamp': ascent['timestamp'],
             'is_flash': ascent['is_flash'] ?? false,
+            'attempts': ascent['attempts'],
             'display_name': ascent['username'] ?? '',
             'is_private': isPrivate,
           });
@@ -605,7 +617,7 @@ ListTile(
     final climbName = activity['climb_name'] ?? 'Unknown';
     final grade = activity['grade'] ?? '';
     final timestamp = _formatTimestamp(activity['timestamp']);
-    final isFlash = activity['is_flash'] ?? false;
+    final isFlash = (activity['is_flash'] ?? false) || (activity['attempts'] as int?) == 1;
     final userName = activity['display_name'] ?? 'User';
     final isPrivate = activity['is_private'] ?? false;
 
@@ -618,8 +630,8 @@ ListTile(
       iconColor = Colors.green;
       actionText = 'created';
     } else {
-      icon = isFlash ? Icons.flash_on : Icons.check_circle_outline;
-      iconColor = isFlash ? Colors.amber : Colors.blue;
+      icon = isFlash ? Icons.bolt : Icons.check_circle_outline;
+      iconColor = isFlash ? Colors.yellow.shade600 : Colors.blue;
       actionText = isFlash ? 'flashed' : 'sent';
     }
 
@@ -1295,7 +1307,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
         for (final ascent in ascents) {
           if (ascent['username'] != widget.displayName) continue;
-          final isFlash = ascent['is_flash'] ?? false;
+          final isFlash = (ascent['is_flash'] ?? false) || (ascent['attempts'] as int?) == 1;
           logs.add({
             'climb_name': climb['name'] ?? 'Unnamed',
             'grade': gradeStr ?? '',
@@ -1400,6 +1412,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                                 ),
                                 title: Text(send['climb_name']),
                                 subtitle: Text(send['is_flash'] == true ? 'Flash' : 'Send'),
+                                // is_flash already accounts for 1-attempt sends
                               );
                             },
                           ),
@@ -1493,12 +1506,22 @@ class _UserSetsPageState extends State<UserSetsPage> {
                         ),
                         subtitle: Text('$sendCount sends'),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ClimbDisplay(climbId: climb['climbid']),
-                          ),
-                        ),
+                        onTap: () {
+                          final ids = climbs
+                              .map((c) => c['climbid'].toString())
+                              .toList();
+                          final idx = ids.indexOf(climb['climbid'].toString());
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ClimbDisplay(
+                                climbId: climb['climbid'],
+                                climbIds: ids,
+                                currentIndex: idx < 0 ? 0 : idx,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     );
                   },
@@ -1528,10 +1551,21 @@ class _AllActivityPageState extends State<AllActivityPage> {
   }
 
   void _openClimb(BuildContext context, String climbId) {
+    final seenIds = <String>{};
+    final climbIds = <String>[];
+    for (final a in allActivity) {
+      final id = a['climb_id']?.toString() ?? '';
+      if (id.isNotEmpty && seenIds.add(id)) climbIds.add(id);
+    }
+    final index = climbIds.indexOf(climbId);
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ClimbDisplay(climbId: climbId),
+        builder: (_) => ClimbDisplay(
+          climbId: climbId,
+          climbIds: climbIds,
+          currentIndex: index < 0 ? 0 : index,
+        ),
       ),
     );
   }
@@ -1597,6 +1631,7 @@ class _AllActivityPageState extends State<AllActivityPage> {
             'grade': climb['grade'] ?? '',
             'timestamp': ascent['timestamp'],
             'is_flash': ascent['is_flash'] ?? false,
+            'attempts': ascent['attempts'],
             'display_name': ascent['username'] ?? '',
             'is_private': isPrivate,
           });
@@ -1653,7 +1688,7 @@ class _AllActivityPageState extends State<AllActivityPage> {
     final climbName = activity['climb_name'] ?? 'Unknown';
     final grade = activity['grade'] ?? '';
     final timestamp = _formatTimestamp(activity['timestamp']);
-    final isFlash = activity['is_flash'] ?? false;
+    final isFlash = (activity['is_flash'] ?? false) || (activity['attempts'] as int?) == 1;
     final isPrivate = activity['is_private'] ?? false;
 
     IconData icon;
@@ -1665,8 +1700,8 @@ class _AllActivityPageState extends State<AllActivityPage> {
       iconColor = Colors.green;
       actionText = 'Created';
     } else {
-      icon = isFlash ? Icons.flash_on : Icons.check_circle_outline;
-      iconColor = isFlash ? Colors.amber : Colors.blue;
+      icon = isFlash ? Icons.bolt : Icons.check_circle_outline;
+      iconColor = isFlash ? Colors.yellow.shade600 : Colors.blue;
       actionText = isFlash ? 'Flashed' : 'Sent';
     }
 
