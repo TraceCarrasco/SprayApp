@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'climb_update.dart';
 import 'Profile.dart';
+import 'beta_videos_tab.dart';
 
 // Original image width x height in pixels
 const double originalImageWidth = 5712;
@@ -804,6 +805,20 @@ class _ClimbDisplayState extends State<ClimbDisplay>
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.videocam_outlined, size: 22),
+            tooltip: "Beta Videos",
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => BetaVideosPage(
+                  climbId: widget.climbId,
+                  climbName: climbName,
+                  isCreator: isCurrentUserCreator,
+                ),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline, size: 18),
             tooltip: "Hold Info",
