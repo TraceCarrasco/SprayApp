@@ -116,7 +116,7 @@ Future<void> deleteUserData(String userId) async {
   Future<void> sendPasswordResetEmail(String email) async {
     await _supabase.auth.resetPasswordForEmail(
       email,
-      redirectTo: 'com.faspraywall.fahumboldtspraywall://login-callback',
+      redirectTo: 'https://williamcastner.github.io/SprayApp/reset-password.html',
     );
   }
 

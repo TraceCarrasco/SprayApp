@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
-import 'package:chewie/chewie.dart';
 
 class BetaVideosPage extends StatefulWidget {
   final String climbId;
@@ -25,6 +26,7 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
   List<Map<String, dynamic>> _videos = [];
   bool _loading = true;
   bool _uploading = false;
+  bool _compressing = false;
 
   @override
   void initState() {
@@ -75,13 +77,29 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
     }
     if (picked == null) return;
 
-    final file = File(picked.path);
+    setState(() => _compressing = true);
+
+    File file;
+    try {
+      final info = await VideoCompress.compressVideo(
+        picked.path,
+        quality: VideoQuality.MediumQuality,
+        deleteOrigin: false,
+      );
+      file = info?.file ?? File(picked.path);
+    } catch (e) {
+      debugPrint('Compression failed, using original: $e');
+      file = File(picked.path);
+    } finally {
+      if (mounted) setState(() => _compressing = false);
+    }
+
     final fileSize = await file.length();
-    if (fileSize > 100 * 1024 * 1024) {
+    if (fileSize > 200 * 1024 * 1024) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Video must be under 100 MB'),
+            content: Text('Video must be under 200 MB'),
             backgroundColor: Colors.red,
           ),
         );
@@ -108,12 +126,38 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
           .from('beta-videos')
           .getPublicUrl(storagePath);
 
+      // Generate and upload first-frame thumbnail
+      String? thumbnailUrl;
+      try {
+        final thumbBytes = await VideoCompress.getByteThumbnail(
+          file.path,
+          quality: 75,
+          position: -1,
+        );
+        if (thumbBytes != null) {
+          final thumbPath = '${widget.climbId}/${user.id}_${ts}_thumb.jpg';
+          await Supabase.instance.client.storage
+              .from('beta-videos')
+              .uploadBinary(
+                thumbPath,
+                thumbBytes,
+                fileOptions: const FileOptions(contentType: 'image/jpeg'),
+              );
+          thumbnailUrl = Supabase.instance.client.storage
+              .from('beta-videos')
+              .getPublicUrl(thumbPath);
+        }
+      } catch (e) {
+        debugPrint('Thumbnail generation failed: $e');
+      }
+
       await Supabase.instance.client.from('beta_videos').insert({
         'climbid': widget.climbId,
         'user_id': user.id,
         'username': displayName,
         'storage_path': storagePath,
         'public_url': publicUrl,
+        'thumbnail_url': thumbnailUrl,
       });
 
       await _fetchVideos();
@@ -153,9 +197,11 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
     if (confirmed != true) return;
 
     try {
+      final storagePath = video['storage_path'] as String;
+      final thumbPath = storagePath.replaceAll('.mp4', '_thumb.jpg');
       await Supabase.instance.client.storage
           .from('beta-videos')
-          .remove([video['storage_path'] as String]);
+          .remove([storagePath, thumbPath]);
       await Supabase.instance.client
           .from('beta_videos')
           .delete()
@@ -185,15 +231,15 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Beta — ${widget.climbName}')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _uploading ? null : _uploadVideo,
-        icon: _uploading
+        onPressed: (_uploading || _compressing) ? null : _uploadVideo,
+        icon: (_uploading || _compressing)
             ? const SizedBox(
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               )
             : const Icon(Icons.upload_rounded),
-        label: Text(_uploading ? 'Uploading...' : 'Upload Beta'),
+        label: Text(_compressing ? 'Compressing...' : _uploading ? 'Uploading...' : 'Upload Beta'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -230,6 +276,8 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
                     final canDelete =
                         widget.isCreator || video['user_id'] == currentUserId;
 
+                    final thumbUrl = video['thumbnail_url'] as String?;
+
                     return GestureDetector(
                       onTap: () => Navigator.push(
                         context,
@@ -247,15 +295,25 @@ class _BetaVideosPageState extends State<BetaVideosPage> {
                           children: [
                             // Thumbnail area
                             Expanded(
-                              child: Container(
-                                color: Colors.grey.shade900,
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.play_circle_outline,
-                                    size: 48,
-                                    color: Colors.white70,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  thumbUrl != null
+                                      ? Image.network(
+                                          thumbUrl,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) =>
+                                              Container(color: Colors.grey.shade900),
+                                        )
+                                      : Container(color: Colors.grey.shade900),
+                                  const Center(
+                                    child: Icon(
+                                      Icons.play_circle_outline,
+                                      size: 48,
+                                      color: Colors.white70,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
                             ),
                             // Info row
@@ -319,34 +377,53 @@ class _VideoPlayerPage extends StatefulWidget {
 }
 
 class _VideoPlayerPageState extends State<_VideoPlayerPage> {
-  late VideoPlayerController _videoController;
-  ChewieController? _chewieController;
+  late VideoPlayerController _controller;
+  bool _initialized = false;
+  bool _showControls = true;
+  Timer? _hideTimer;
 
   @override
   void initState() {
     super.initState();
-    _videoController =
-        VideoPlayerController.networkUrl(Uri.parse(widget.url));
-    _videoController.initialize().then((_) {
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    _controller.initialize().then((_) {
       if (mounted) {
-        setState(() {
-          _chewieController = ChewieController(
-            videoPlayerController: _videoController,
-            autoPlay: true,
-            looping: false,
-            aspectRatio: _videoController.value.aspectRatio,
-            allowFullScreen: true,
-            allowMuting: true,
-          );
-        });
+        setState(() => _initialized = true);
+        _controller.play();
+        _scheduleHide();
       }
     });
+    _controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  void _onTap() {
+    if (!_showControls) {
+      setState(() => _showControls = true);
+      if (_controller.value.isPlaying) _scheduleHide();
+      return;
+    }
+    if (_controller.value.isPlaying) {
+      _controller.pause();
+      _hideTimer?.cancel();
+    } else {
+      _controller.play();
+      _scheduleHide();
+    }
   }
 
   @override
   void dispose() {
-    _chewieController?.dispose();
-    _videoController.dispose();
+    _hideTimer?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -357,13 +434,66 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text('Beta by ${widget.uploaderName}'),
+        toolbarHeight: 36,
       ),
-      body: Center(
-        child: _chewieController != null
-            ? Chewie(controller: _chewieController!)
-            : const CircularProgressIndicator(),
-      ),
+      body: !_initialized
+          ? const Center(child: CircularProgressIndicator())
+          : GestureDetector(
+              onTap: _onTap,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: _controller.value.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    ),
+                  ),
+                  // Play/pause icon
+                  AnimatedOpacity(
+                    opacity: _showControls ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.black38,
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(16),
+                      child: Icon(
+                        _controller.value.isPlaying
+                            ? Icons.pause
+                            : Icons.play_arrow,
+                        color: Colors.white,
+                        size: 52,
+                      ),
+                    ),
+                  ),
+                  // Progress bar
+                  Positioned(
+                    bottom: 70,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedOpacity(
+                      opacity: _showControls ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: SizedBox(
+                        height: 28,
+                        child: VideoProgressIndicator(
+                          _controller,
+                          allowScrubbing: true,
+                          colors: VideoProgressColors(
+                            playedColor: Theme.of(context).colorScheme.primary,
+                            bufferedColor: Colors.white30,
+                            backgroundColor: Colors.white12,
+                          ),
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
