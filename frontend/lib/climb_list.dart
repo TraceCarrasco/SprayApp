@@ -501,6 +501,9 @@ class _ClimbListState extends State<ClimbList>
                                       .map((c) => c['climbid'].toString())
                                       .toList();
                                   final idx = ids.indexOf(climb['climbid'].toString());
+                                  final savedOffset = _scrollController.hasClients
+                                      ? _scrollController.offset
+                                      : 0.0;
                                   await Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -511,7 +514,15 @@ class _ClimbListState extends State<ClimbList>
                                       ),
                                     ),
                                   );
-                                  _fetchClimbs();
+                                  await _fetchClimbs();
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    if (_scrollController.hasClients) {
+                                      _scrollController.jumpTo(savedOffset.clamp(
+                                        0.0,
+                                        _scrollController.position.maxScrollExtent,
+                                      ));
+                                    }
+                                  });
                                 },
                               ),
                             );
