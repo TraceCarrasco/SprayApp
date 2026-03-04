@@ -161,7 +161,7 @@ class _LoginPageState extends State<LoginPage> {
               padding: const EdgeInsets.all(12.0),
               child: Text(
                 "Save your spray wall climbs and view others' climbs using this website."
-                " For any inquiries, bug reports or questions, please text 267-797-6791.",
+                " For any inquiries, bug reports or questions, please email williambcastner@gmail.com.",
                 textAlign: TextAlign.center,
                 style: Theme.of(
                   context,
