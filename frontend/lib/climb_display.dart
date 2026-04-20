@@ -476,7 +476,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                         await _togglePrivacy();
                         setModalState(() {}); // Update modal UI
                       },
-                      activeColor: Colors.orange,
+                      activeThumbColor: Colors.orange,
                     ),
                     onTap: () async {
                       await _togglePrivacy();
@@ -887,19 +887,27 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        Image.asset(
-                                          'assets/spray_wall.jpeg',
-                                          width: displayedWidth,
-                                          height: displayedHeight,
-                                          fit: BoxFit.contain,
-                                          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                                            if (wasSynchronouslyLoaded || frame != null) return child;
-                                            return SizedBox(
-                                              width: displayedWidth,
-                                              height: displayedHeight,
-                                              child: const Center(child: CircularProgressIndicator()),
-                                            );
-                                          },
+                                        ColorFiltered(
+                                          colorFilter: const ColorFilter.matrix([
+                                            1.0722, -0.429, -0.0432, 0, -25.5,
+                                            -0.1278, 0.771, -0.0432, 0, -25.5,
+                                            -0.1278, -0.429, 1.1568, 0, -25.5,
+                                            0, 0, 0, 1, 0,
+                                          ]),
+                                          child: Image.asset(
+                                            'assets/spray_wall.jpeg',
+                                            width: displayedWidth,
+                                            height: displayedHeight,
+                                            fit: BoxFit.contain,
+                                            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                                              if (wasSynchronouslyLoaded || frame != null) return child;
+                                              return SizedBox(
+                                                width: displayedWidth,
+                                                height: displayedHeight,
+                                                child: const Center(child: CircularProgressIndicator()),
+                                              );
+                                            },
+                                          ),
                                         ),
                                         CustomPaint(
                                           size: Size(
