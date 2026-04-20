@@ -330,19 +330,11 @@ class _DraftEditPageState extends State<DraftEditPage> {
                                     _handleTap(details, displayedSize),
                                 child: Stack(
                                   children: [
-                                    ColorFiltered(
-                                      colorFilter: const ColorFilter.matrix([
-                                        1.0722, -0.429, -0.0432, 0, -25.5,
-                                        -0.1278, 0.771, -0.0432, 0, -25.5,
-                                        -0.1278, -0.429, 1.1568, 0, -25.5,
-                                        0, 0, 0, 1, 0,
-                                      ]),
-                                      child: Image.asset(
-                                        'assets/spray_wall.jpeg',
-                                        width: displayedWidth,
-                                        height: displayedHeight,
-                                        fit: BoxFit.fill,
-                                      ),
+                                    Image.asset(
+                                      'assets/spray_wall.jpeg',
+                                      width: displayedWidth,
+                                      height: displayedHeight,
+                                      fit: BoxFit.fill,
                                     ),
                                     CustomPaint(
                                       size: displayedSize,
